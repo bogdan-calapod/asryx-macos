@@ -5,7 +5,7 @@ One-step setup for whisper with live mic recording and auto-clipboard transcript
 ## Quick Setup
 
 ```bash
-bash <(curl -s https://ashgw.me/api/v1/whisper)
+bash <(curl -s https://api.rccyx.com/v1/whisper)
 ````
 
 Pick your model size:
