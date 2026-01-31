@@ -6,7 +6,7 @@ umask 022
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 
-APP_ID="whisper"
+APP_ID="asr"
 PREFIX_DEFAULT="${HOME}/.local"
 
 AUTO_YES=0
@@ -49,14 +49,15 @@ usage:
 
 defaults:
   --prefix $HOME/.local
-  purge-workspace: auto (only if it looks like the install workspace)
-  purge-models:    auto (only models recorded in manifest)
+  purge-workspace: auto (only if it looks like whisper.cpp clone)
+  purge-models:    auto (only model recorded in manifest)
 
 behavior:
-  - removes <prefix>/bin/whisper-cli if it matches manifest
-  - removes <prefix>/bin/whisper-stream if it matches manifest
-  - removes model recorded in manifest (auto mode) unless keep-models
-  - removes manifest and share dir (if empty)
+  - removes engine binaries only if they match manifest (or if --force)
+  - removes asr-toggle only if it matches manifest (or if --force)
+  - removes env contract only if it matches manifest (or if --force)
+  - removes recorded model (auto) unless keep-models
+  - removes manifest and prunes empty share dirs
   - optionally removes workspace <prefix>/opt/whisper.cpp (auto-safe)
   - does not touch apt packages
 EOF
@@ -103,10 +104,18 @@ on_err() {
 
 sha256() { sha256sum "$1" | awk '{print $1}'; }
 
+BIN_DIR=""
+SHARE_DIR=""
+MODELS_DIR=""
+ENV_FILE=""
+MANIFEST=""
+WORKSPACE=""
+
 set_paths() {
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
+  ENV_FILE="${SHARE_DIR}/asr.env"
   MANIFEST="${SHARE_DIR}/install.manifest"
   WORKSPACE="${PREFIX}/opt/whisper.cpp"
 }
@@ -132,32 +141,24 @@ confirm_plan() {
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}whisper engine uninstaller${nc}"
+  echo -e "${bold}asr uninstaller${nc}"
   echo
   echo "prefix:      ${PREFIX}"
   echo "bin dir:     ${BIN_DIR}"
   echo "share dir:   ${SHARE_DIR}"
   echo "models dir:  ${MODELS_DIR}"
+  echo "env:         ${ENV_FILE}"
   echo "manifest:    ${MANIFEST}"
   echo "workspace:   ${WORKSPACE}"
   echo "purge ws:    ${PURGE_WORKSPACE_MODE}"
   echo "purge models:${PURGE_MODELS_MODE}"
   echo "force:       $([ "${FORCE}" -eq 1 ] && echo yes || echo no)"
   hr
-  echo "will do:"
-  echo "  - remove binaries only if they match manifest (or if --force)"
-  echo "  - remove recorded model only (auto) unless keep-models"
-  echo "  - remove manifest and prune empty share dirs"
-  echo "  - optionally remove workspace (auto-safe) unless keep-workspace"
-  echo
-  echo "will NOT do:"
-  echo "  - remove apt packages"
-  echo "  - touch shell rc files or any personal workflow repo"
-  hr
 }
 
 remove_file_if_matches_manifest() {
   local path="$1" expected_sha="$2" label="$3"
+
   if [ ! -e "${path}" ] && [ ! -L "${path}" ]; then
     ok "${label}: not present (skipping)"
     return 0
@@ -245,20 +246,7 @@ prune_empty_dirs() {
   rmdir "${dir}" 2>/dev/null || true
 }
 
-remove_manifest_and_prune() {
-  step "remove (manifest)"
-  if [ -f "${MANIFEST}" ]; then
-    rm -f "${MANIFEST}"
-    ok "removed manifest"
-  else
-    ok "manifest not present (skipping)"
-  fi
-  prune_empty_dirs "${MODELS_DIR}"
-  prune_empty_dirs "${SHARE_DIR}"
-  prune_empty_dirs "${PREFIX}/share"
-}
-
-workspace_looks_like_ours() {
+workspace_looks_like_whisper_cpp() {
   [ -d "${WORKSPACE}/.git" ] || return 1
   local url
   url="$(git -C "${WORKSPACE}" config --get remote.origin.url 2>/dev/null || true)"
@@ -293,11 +281,11 @@ remove_workspace_auto_safe() {
     return 0
   fi
 
-  if workspace_looks_like_ours; then
+  if workspace_looks_like_whisper_cpp; then
     rm -rf "${WORKSPACE}"
     ok "workspace removed (auto-safe)"
   else
-    warn "workspace does not look like a whisper.cpp clone; leaving in place"
+    warn "workspace does not look like whisper.cpp clone; leaving in place"
     warn "path: ${WORKSPACE}"
   fi
 }
@@ -313,29 +301,28 @@ main() {
   step "read manifest"
   if [ ! -f "${MANIFEST}" ] && [ "${FORCE}" -ne 1 ]; then
     warn "manifest not found at ${MANIFEST}"
-    warn "refusing to remove binaries without proof (use --force if you insist)"
+    warn "refusing to remove files without proof (use --force if you insist)"
   fi
 
-  local cli_path cli_sha stream_path stream_sha model_path model_sha
-  cli_path="$(mget cli_path "${MANIFEST}")"
-  cli_sha="$(mget cli_sha256 "${MANIFEST}")"
-  stream_path="$(mget stream_path "${MANIFEST}")"
-  stream_sha="$(mget stream_sha256 "${MANIFEST}")"
+  local engine_cli_path engine_cli_sha engine_stream_path engine_stream_sha toggle_path toggle_sha env_path env_sha model_path model_sha
+  engine_cli_path="$(mget engine_cli_path "${MANIFEST}")"
+  engine_cli_sha="$(mget engine_cli_sha256 "${MANIFEST}")"
+  engine_stream_path="$(mget engine_stream_path "${MANIFEST}")"
+  engine_stream_sha="$(mget engine_stream_sha256 "${MANIFEST}")"
+  toggle_path="$(mget toggle_path "${MANIFEST}")"
+  toggle_sha="$(mget toggle_sha256 "${MANIFEST}")"
+  env_path="$(mget env_path "${MANIFEST}")"
+  env_sha="$(mget env_sha256 "${MANIFEST}")"
   model_path="$(mget model_path "${MANIFEST}")"
   model_sha="$(mget model_sha256 "${MANIFEST}")"
 
   step "remove (bin)"
-  if [ -n "${cli_path}" ]; then
-    remove_file_if_matches_manifest "${cli_path}" "${cli_sha}" "whisper-cli"
-  else
-    remove_file_if_matches_manifest "${BIN_DIR}/whisper-cli" "${cli_sha}" "whisper-cli"
-  fi
+  remove_file_if_matches_manifest "${engine_cli_path:-${BIN_DIR}/whisper-cli}" "${engine_cli_sha}" "whisper-cli"
+  remove_file_if_matches_manifest "${engine_stream_path:-${BIN_DIR}/whisper-stream}" "${engine_stream_sha}" "whisper-stream"
+  remove_file_if_matches_manifest "${toggle_path:-${BIN_DIR}/asr-toggle}" "${toggle_sha}" "asr-toggle"
 
-  if [ -n "${stream_path}" ]; then
-    remove_file_if_matches_manifest "${stream_path}" "${stream_sha}" "whisper-stream"
-  else
-    remove_file_if_matches_manifest "${BIN_DIR}/whisper-stream" "${stream_sha}" "whisper-stream"
-  fi
+  step "remove (env)"
+  remove_file_if_matches_manifest "${env_path:-${ENV_FILE}}" "${env_sha}" "asr.env"
 
   step "remove (models)"
   if [ -f "${MANIFEST}" ] || [ "${FORCE}" -eq 1 ]; then
@@ -344,7 +331,18 @@ main() {
     ok "models: no manifest (skipping)"
   fi
 
-  remove_manifest_and_prune
+  step "remove (manifest)"
+  if [ -f "${MANIFEST}" ]; then
+    rm -f "${MANIFEST}"
+    ok "removed manifest"
+  else
+    ok "manifest not present (skipping)"
+  fi
+
+  prune_empty_dirs "${MODELS_DIR}"
+  prune_empty_dirs "${SHARE_DIR}"
+  prune_empty_dirs "${PREFIX}/share"
+
   remove_workspace_auto_safe
 
   step "done"
@@ -353,4 +351,3 @@ main() {
 }
 
 main "$@"
-

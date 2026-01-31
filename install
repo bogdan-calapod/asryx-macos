@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
@@ -6,11 +7,10 @@ umask 022
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 
-APP_ID="whisper"
-REPO_URL_DEFAULT="https://github.com/ggml-org/whisper.cpp.git"
+APP_ID="asr"
+ENGINE_REPO_URL_DEFAULT="https://github.com/ggml-org/whisper.cpp.git"
 
 PREFIX_DEFAULT="${HOME}/.local"
-ROOT_DEFAULT=""
 BUILD_SUBDIR="build"
 
 SHA_DEFAULT="040510a132f0a9b51d4692b57a6abfd8c9660696"
@@ -20,14 +20,8 @@ AUTO_YES=0
 WITH_MODEL=1
 MODEL_SLUG="${MODEL_DEFAULT}"
 SHA="${SHA_DEFAULT}"
-REPO_URL="${REPO_URL_DEFAULT}"
+ENGINE_REPO_URL="${ENGINE_REPO_URL_DEFAULT}"
 PREFIX="${PREFIX_DEFAULT}"
-ROOT=""
-BUILD=""
-BIN_DIR=""
-SHARE_DIR=""
-MODELS_DIR=""
-MANIFEST=""
 FORCE=0
 CLEAN_BUILD=0
 
@@ -39,6 +33,12 @@ APT_PKGS=(
   cmake
   pkg-config
   ninja-build
+  zsh
+  alsa-utils
+  libnotify-bin
+  wl-clipboard
+  xclip
+  pulseaudio-utils
 )
 
 if [ -t 1 ]; then
@@ -79,15 +79,17 @@ defaults:
   (models are installed unless --no-model)
 
 behavior:
-  - installs build deps via apt
-  - clones/updates repo into <prefix>/opt/whisper.cpp at the pinned sha
+  - installs deps via apt (zsh, recorder tools, clipboard tools, notify-send, build deps)
+  - clones/updates whisper.cpp into <prefix>/opt/whisper.cpp at pinned sha
   - builds Release engine
-  - installs stable binaries into <prefix>/bin: whisper-cli (and whisper-stream if built)
-  - optionally installs a ggml model into <prefix>/share/whisper/models
-  - writes a manifest to <prefix>/share/whisper/install.manifest
+  - installs <prefix>/bin/whisper-cli (and whisper-stream if built)
+  - installs ggml model into <prefix>/share/asr/models
+  - installs toggle into <prefix>/bin/asr-toggle
+  - writes env contract to <prefix>/share/asr/asr.env
+  - writes uninstall manifest to <prefix>/share/asr/install.manifest
 
 notes:
-  - no shell rc edits, no functions, no keybinds, no recorder, no clipboard glue
+  - no shell rc edits, no compositor edits, no keybinds
   - uninstall is manifest-driven and safe by default
 EOF
 }
@@ -97,7 +99,7 @@ parse_args() {
     case "$1" in
       --yes|-y) AUTO_YES=1 ;;
       --prefix) PREFIX="${2:-}"; [ -n "${PREFIX}" ] || die "missing value for --prefix"; shift ;;
-      --repo) REPO_URL="${2:-}"; [ -n "${REPO_URL}" ] || die "missing value for --repo"; shift ;;
+      --repo) ENGINE_REPO_URL="${2:-}"; [ -n "${ENGINE_REPO_URL}" ] || die "missing value for --repo"; shift ;;
       --sha) SHA="${2:-}"; [ -n "${SHA}" ] || die "missing value for --sha"; shift ;;
       --model) MODEL_SLUG="${2:-}"; [ -n "${MODEL_SLUG}" ] || die "missing value for --model"; shift ;;
       --no-model) WITH_MODEL=0 ;;
@@ -132,9 +134,9 @@ on_err() {
   exit "${code}"
 }
 
-require_debian() {
-  command -v apt-get >/dev/null 2>&1 || die "debian-only installer: apt-get not found"
-  command -v dpkg >/dev/null 2>&1 || die "debian-only installer: dpkg not found"
+require_debianish() {
+  command -v apt-get >/dev/null 2>&1 || die "apt-get not found"
+  command -v dpkg >/dev/null 2>&1 || die "dpkg not found"
 }
 
 confirm_plan() {
@@ -186,47 +188,58 @@ apt_install_missing() {
 
 sha256() { sha256sum "$1" | awk '{print $1}'; }
 
+SCRIPT_DIR=""
+ROOT=""
+BUILD=""
+BIN_DIR=""
+SHARE_DIR=""
+MODELS_DIR=""
+ENV_FILE=""
+MANIFEST=""
+
 set_paths() {
   [ -n "${PREFIX}" ] || die "prefix empty"
-  ROOT_DEFAULT="${PREFIX}/opt/whisper.cpp"
-  ROOT="${ROOT_DEFAULT}"
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT="${PREFIX}/opt/whisper.cpp"
   BUILD="${ROOT}/${BUILD_SUBDIR}"
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
+  ENV_FILE="${SHARE_DIR}/asr.env"
   MANIFEST="${SHARE_DIR}/install.manifest"
 }
 
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}whisper engine installer${nc}"
+  echo -e "${bold}asr installer${nc}"
   echo
   echo "prefix:     ${PREFIX}"
-  echo "repo:       ${REPO_URL}"
+  echo "repo:       ${ENGINE_REPO_URL}"
   echo "commit:     ${SHA}"
   echo "workspace:  ${ROOT}"
   echo "build dir:  ${BUILD}"
   echo "bin dir:    ${BIN_DIR}"
   echo "share dir:  ${SHARE_DIR}"
   echo "models dir: ${MODELS_DIR}"
+  echo "env:        ${ENV_FILE}"
   echo "manifest:   ${MANIFEST}"
   echo "model:      $([ "${WITH_MODEL}" -eq 1 ] && echo "${MODEL_SLUG}" || echo "none")"
   echo "clean:      $([ "${CLEAN_BUILD}" -eq 1 ] && echo "yes" || echo "no")"
   hr
   echo "will do:"
-  echo "  - install build deps (apt)"
-  echo "  - clone/update repo and hard-checkout pinned commit"
-  echo "  - build Release binaries"
-  echo "  - install stable binaries into <prefix>/bin"
-  if [ "${WITH_MODEL}" -eq 1 ]; then
-    echo "  - install model into <prefix>/share/${APP_ID}/models"
-  fi
+  echo "  - install deps (apt)"
+  echo "  - clone/update engine repo and hard-checkout pinned commit"
+  echo "  - build Release engine"
+  echo "  - install engine binaries into <prefix>/bin"
+  echo "  - install toggle into <prefix>/bin/asr-toggle"
+  echo "  - install model into <prefix>/share/asr/models (unless --no-model)"
+  echo "  - write <prefix>/share/asr/asr.env contract"
   echo "  - write manifest for safe uninstall"
   echo
   echo "will NOT do:"
   echo "  - modify shell rc files"
-  echo "  - install any keybind/toggle/recorder/clipboard workflow"
+  echo "  - edit Hyprland or any compositor config"
   echo "  - run daemons or background services"
   hr
 }
@@ -238,8 +251,8 @@ clone_or_update() {
     ok "repo exists: ${ROOT}"
     git -C "${ROOT}" fetch --all --tags --prune
   else
-    ok "cloning: ${REPO_URL} -> ${ROOT}"
-    git clone "${REPO_URL}" "${ROOT}"
+    ok "cloning: ${ENGINE_REPO_URL} -> ${ROOT}"
+    git clone "${ENGINE_REPO_URL}" "${ROOT}"
   fi
 
   git -C "${ROOT}" cat-file -e "${SHA}^{commit}" 2>/dev/null || die "commit not found: ${SHA}"
@@ -269,7 +282,7 @@ build_release() {
 }
 
 install_binaries_atomic() {
-  step "install (bin)"
+  step "install (engine bin)"
   mkdir -p "${BIN_DIR}"
 
   local stage="${BIN_DIR}/.${APP_ID}.stage.${timestamp}"
@@ -323,45 +336,92 @@ download_model_if_enabled() {
   [ -f "${dl}" ] || die "missing model downloader: ${dl}"
 
   info "downloading: ${MODEL_SLUG}"
-  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" "${MODELS_DIR}" )
-  [ -s "${model_file}" ] || die "model download failed: ${model_file}"
+  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" )
+  local downloaded="${ROOT}/models/ggml-${MODEL_SLUG}.bin"
+  [ -s "${downloaded}" ] || die "model download failed: ${downloaded}"
+  install -m 0644 "${downloaded}" "${model_file}"
   ok "model installed: $(basename "${model_file}")"
+}
+
+install_toggle() {
+  step "install (toggle)"
+  mkdir -p "${BIN_DIR}"
+
+  local src="${SCRIPT_DIR}/toggle"
+  [ -f "${src}" ] || die "toggle file not found next to installer: ${src}"
+
+  local dst="${BIN_DIR}/asr-toggle"
+  install -m 0755 "${src}" "${dst}"
+  ok "installed: ${dst}"
+}
+
+write_env_contract() {
+  step "env contract"
+  mkdir -p "${SHARE_DIR}"
+
+  local engine="${BIN_DIR}/whisper-cli"
+  local toggle="${BIN_DIR}/asr-toggle"
+  local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+
+  {
+    echo "ASR_PREFIX=${PREFIX}"
+    echo "ASR_ENGINE=${engine}"
+    if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model}" ]; then
+      echo "ASR_MODEL=${model}"
+      echo "ASR_MODEL_SLUG=${MODEL_SLUG}"
+    else
+      echo "ASR_MODEL="
+      echo "ASR_MODEL_SLUG=${MODEL_SLUG}"
+    fi
+    echo "ASR_TOGGLE=${toggle}"
+  } > "${ENV_FILE}"
+
+  ok "wrote: ${ENV_FILE}"
 }
 
 write_manifest() {
   step "manifest"
   mkdir -p "${SHARE_DIR}"
 
-  local cli_dst="${BIN_DIR}/whisper-cli"
-  local stream_dst="${BIN_DIR}/whisper-stream"
-  local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+  local engine="${BIN_DIR}/whisper-cli"
+  local stream="${BIN_DIR}/whisper-stream"
+  local toggle="${BIN_DIR}/asr-toggle"
+  local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
 
   {
     echo "app_id=${APP_ID}"
     echo "timestamp=${timestamp}"
     echo "prefix=${PREFIX}"
-    echo "repo_url=${REPO_URL}"
-    echo "sha=${SHA}"
+    echo "engine_repo_url=${ENGINE_REPO_URL}"
+    echo "engine_sha=${SHA}"
     echo "workspace=${ROOT}"
     echo "build_dir=${BUILD}"
     echo "bin_dir=${BIN_DIR}"
     echo "share_dir=${SHARE_DIR}"
     echo "models_dir=${MODELS_DIR}"
-    echo "cli_path=${cli_dst}"
-    echo "cli_sha256=$(sha256 "${cli_dst}")"
-    if [ -x "${stream_dst}" ]; then
-      echo "stream_path=${stream_dst}"
-      echo "stream_sha256=$(sha256 "${stream_dst}")"
+    echo "env_path=${ENV_FILE}"
+    echo "env_sha256=$(sha256 "${ENV_FILE}")"
+
+    echo "engine_cli_path=${engine}"
+    echo "engine_cli_sha256=$(sha256 "${engine}")"
+
+    if [ -x "${stream}" ]; then
+      echo "engine_stream_path=${stream}"
+      echo "engine_stream_sha256=$(sha256 "${stream}")"
     else
-      echo "stream_path="
-      echo "stream_sha256="
+      echo "engine_stream_path="
+      echo "engine_stream_sha256="
     fi
-    if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model_file}" ]; then
+
+    echo "toggle_path=${toggle}"
+    echo "toggle_sha256=$(sha256 "${toggle}")"
+
+    if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model}" ]; then
       echo "model_slug=${MODEL_SLUG}"
-      echo "model_path=${model_file}"
-      echo "model_sha256=$(sha256 "${model_file}")"
+      echo "model_path=${model}"
+      echo "model_sha256=$(sha256 "${model}")"
     else
-      echo "model_slug="
+      echo "model_slug=${MODEL_SLUG}"
       echo "model_path="
       echo "model_sha256="
     fi
@@ -374,7 +434,9 @@ verify_install() {
   step "verify"
   [ -x "${BIN_DIR}/whisper-cli" ] || die "missing: ${BIN_DIR}/whisper-cli"
   "${BIN_DIR}/whisper-cli" --help >/dev/null 2>&1 || die "whisper-cli failed to run"
+  [ -x "${BIN_DIR}/asr-toggle" ] || die "missing: ${BIN_DIR}/asr-toggle"
   ok "engine ok"
+  ok "toggle ok"
 
   if [ "${WITH_MODEL}" -eq 1 ]; then
     local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
@@ -384,14 +446,8 @@ verify_install() {
 
   echo
   hr
-  echo -e "${bold}installed engine surface:${nc}"
-  echo "  ${BIN_DIR}/whisper-cli"
-  if [ -x "${BIN_DIR}/whisper-stream" ]; then
-    echo "  ${BIN_DIR}/whisper-stream"
-  fi
-  echo
-  echo -e "${bold}manifest:${nc}"
-  echo "  ${MANIFEST}"
+  echo -e "${bold}hyprland example:${nc}"
+  echo "  bind = ALT, W, exec, asr-toggle"
   hr
 }
 
@@ -399,7 +455,7 @@ main() {
   trap on_err ERR
   parse_args "$@"
   log_setup
-  require_debian
+  require_debianish
   set_paths
   print_plan
   confirm_plan
@@ -409,12 +465,13 @@ main() {
   build_release
   install_binaries_atomic
   download_model_if_enabled
+  install_toggle
+  write_env_contract
   write_manifest
   verify_install
   step "done"
-  ok "installed whisper engine"
+  ok "installed asr"
   ok "log: ${LOG_FILE}"
 }
 
 main "$@"
-

@@ -1,61 +1,86 @@
-# Whisper Toggle (Linux)
+# asr
 
-One-step setup for whisper with live mic recording and auto-clipboard transcription.
+A single toggle that turns your voice into text.
 
-## Quick Setup
+Run it once: it records.
+Run it again: it stops, transcribes, copies to clipboard, and notifies.
 
-```bash
-bash <(curl -s https://api.rccyx.com/v1/whisper)
+This repo ships the whole surface: engine install, models, and the toggle script. Hyprland is assumed to already exist if you want a keybind, but nothing here edits your dotfiles or compositor config.
+
+## install
+
+Clone, then run the installer.
+
+```sh
+git clone https://github.com/rccyx/asr.git
+cd asr
+bash ./install --yes
 ````
 
-Pick your model size:
+By default it installs under `$HOME/.local`.
 
-* **Base** – fastest
-* **Medium** – balanced
-* **Large** – most accurate
+After install you should have:
 
-## Usage
-Run:
+`$HOME/.local/bin/asr-toggle`
+`$HOME/.local/bin/whisper-cli`
+`$HOME/.local/share/asr/models/ggml-<model>.bin`
+`$HOME/.local/share/asr/asr.env`
+`$HOME/.local/share/asr/install.manifest`
 
-```bash
-w
-```
-* Speak into your mic
-* Press **Ctrl+C** to stop
-* Transcription is copied to your clipboard
+## use
 
-### Keybind Toggle
+If you are on Hyprland, bind it to a key. Example:
 
-Install the toggle script:
-
-```bash
-chmod +x ~/.local/bin/toggle
-```
-
-Bind it to a key (example `Alt+W`).
-
-Using Hyprland for example:
 ```ini
-bind = ALT, W, exec, /home/youruser/.local/bin/toggle
+bind = ALT, W, exec, asr-toggle
 ```
 
-Reload config:
+Now press `ALT+W` to start recording, press again to stop and transcribe.
 
-```bash
-hyprctl reload && hyprctl binds
+You can also just run `asr-toggle` from a terminal, from a script, or from whatever control surface you prefer. It does not care, it only exposes a single toggle.
+
+## uninstall
+
+```sh
+bash ./uninstall --yes
 ```
 
-Now:
+<details>
+<summary><strong>what it uses under the hood</strong></summary>
 
-* **First press** → start recording
-* **Second press** → stop + transcribe + copy
+It installs a pinned build of `whisper.cpp` for offline speech to text, installs `whisper-cli` into your prefix, and downloads a ggml model into your prefix.
 
-## Troubleshooting
+The toggle script is installed as `asr-toggle` and is prefix-relative, so it does not depend on your repo checkout after install.
 
-* Ensure your model exists in `~/.local/share/whisper/models`
-* Check mic devices: `arecord -l`
-* Clipboard requires `wl-copy` (Wayland) or `xclip` (X11)
+</details>
 
-## License
+<details>
+<summary><strong>requirements and behavior</strong></summary>
 
-Apache-2.0 © [@rccyx](https://rccyx.com)
+This targets Debian/Ubuntu style systems (apt). It installs what it needs via apt.
+
+Recording: prefers `pw-record` if present, otherwise uses `arecord`.
+Clipboard: uses `wl-copy` if present, otherwise `xclip`.
+Notifications: uses `notify-send` if present.
+
+Nothing runs as a daemon. No services. No background installs after the toggle exits.
+
+</details>
+
+<details>
+<summary><strong>configuration (optional)</strong></summary>
+
+You are not supposed to need options. But, if you insist, the toggle supports environment overrides:
+
+`ASR_LANG` sets the transcription language (example: `en`, `fr`, `ar`).
+`ASR_THREADS` sets thread count.
+`ASR_MODEL` overrides the model path.
+`ASR_ENGINE` overrides the engine path.
+
+Everything else is opinionated on purpose.
+
+</details>
+
+## license
+
+Apache-2.0
