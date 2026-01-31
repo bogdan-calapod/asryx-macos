@@ -1,0 +1,117 @@
+name: distro-smoke
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: debian-trixie
+            image: debian:trixie
+          - id: ubuntu-24.04
+            image: ubuntu:24.04
+
+    name: smoke (${{ matrix.id }})
+
+    container:
+      image: ${{ matrix.image }}
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CI: "1"
+      GIT_TERMINAL_PROMPT: "0"
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: install base tools
+        run: |
+          set -eux
+          if ! command -v apt-get >/dev/null; then
+            echo "apt-get not found; unsupported image"
+            exit 1
+          fi
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            sudo \
+            xz-utils \
+            tar
+          rm -rf /var/lib/apt/lists/*
+
+      - name: create ci user (passwordless sudo)
+        run: |
+          set -eux
+          useradd -m -s /bin/bash ci
+          getent group sudo >/dev/null || groupadd sudo
+          usermod -aG sudo ci
+          echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
+          chmod 0440 /etc/sudoers.d/ci
+          mkdir -p /home/ci/.cache /home/ci/.local
+          chown -R ci:ci /home/ci
+
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: fix workspace perms for ci user
+        run: |
+          set -eux
+          chown -R ci:ci "$GITHUB_WORKSPACE"
+
+      - name: mark workspace as safe for git (ci user)
+        run: |
+          set -eux
+          sudo -u ci -H bash -lc "set -euo pipefail; git config --global --add safe.directory \"$GITHUB_WORKSPACE\""
+
+      - name: run install (smoke)
+        run: |
+          set -eux
+          chmod +x ./install
+          WS="$GITHUB_WORKSPACE"
+          sudo -u ci -H bash -lc "set -euo pipefail; cd -- \"$WS\"; CI=1 ./install --yes"
+
+      - name: verify install artifacts
+        run: |
+          set -eux
+          test -x /home/ci/.local/bin/whisper-cli
+          test -f /home/ci/.local/share/whisper/install.manifest
+          test -f /home/ci/.local/share/whisper/models/ggml-base.en.bin
+          sudo -u ci -H bash -lc "set -euo pipefail; PATH=/home/ci/.local/bin:\$PATH whisper-cli --help >/dev/null"
+
+      - name: run uninstall (smoke)
+        run: |
+          set -eux
+          chmod +x ./uninstall
+          WS="$GITHUB_WORKSPACE"
+          sudo -u ci -H bash -lc "set -euo pipefail; cd -- \"$WS\"; CI=1 ./uninstall --yes"
+
+      - name: verify uninstall cleanup
+        run: |
+          set -eux
+          test ! -e /home/ci/.local/bin/whisper-cli
+          test ! -e /home/ci/.local/share/whisper/install.manifest
+
+      - name: upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asr-logs-${{ matrix.id }}
+          path: |
+            /home/ci/.cache/whisper
+            /home/ci/.local/share/whisper
+

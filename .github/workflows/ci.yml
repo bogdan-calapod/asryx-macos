@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: CI-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distros:
+    uses: ./.github/workflows/on-workflow-call-distro-smoke.yml
+
+  shell:
+    uses: ./.github/workflows/on-workflow-call-shell-check.yml
+
