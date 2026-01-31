@@ -89,7 +89,7 @@ transcribe() {
 
   copy_clip "$TXT_FILE"
   ok "copied to clipboard ($(wc -w < "$TXT_FILE") words)"
-  notify "ASRYX" "copied transcription to clipboard"
+  notify "asryx" "copied transcription to clipboard"
   return 0
 }
 
@@ -102,7 +102,7 @@ start_recording() {
   fi
   echo $! > "$PID_FILE"
   ok "recording (run again to stop)"
-  notify "ASRYX" "recording, run again to stop"
+  notify "asryx" "recording..."
 }
 
 stop_recording() {

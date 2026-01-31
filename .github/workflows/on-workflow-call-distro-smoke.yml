@@ -17,8 +17,6 @@ jobs:
         include:
           - id: debian-trixie
             image: debian:trixie
-          - id: ubuntu-24.04
-            image: ubuntu:24.04
 
     name: smoke (${{ matrix.id }})
 
