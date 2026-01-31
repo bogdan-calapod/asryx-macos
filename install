@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
@@ -7,7 +6,7 @@ umask 022
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 
-APP_ID="asr"
+APP_ID="asryx"
 ENGINE_REPO_URL_DEFAULT="https://github.com/ggml-org/whisper.cpp.git"
 
 PREFIX_DEFAULT="${HOME}/.local"
@@ -83,10 +82,10 @@ behavior:
   - clones/updates whisper.cpp into <prefix>/opt/whisper.cpp at pinned sha
   - builds Release engine
   - installs <prefix>/bin/whisper-cli (and whisper-stream if built)
-  - installs ggml model into <prefix>/share/asr/models
-  - installs toggle into <prefix>/bin/asr-toggle
-  - writes env contract to <prefix>/share/asr/asr.env
-  - writes uninstall manifest to <prefix>/share/asr/install.manifest
+  - installs ggml model into <prefix>/share/asryx/models
+  - installs toggle into <prefix>/bin/asryx
+  - writes env contract to <prefix>/share/asryx/asryx.env
+  - writes uninstall manifest to <prefix>/share/asryx/install.manifest
 
 notes:
   - no shell rc edits, no compositor edits, no keybinds
@@ -205,14 +204,14 @@ set_paths() {
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
-  ENV_FILE="${SHARE_DIR}/asr.env"
+  ENV_FILE="${SHARE_DIR}/asryx.env"
   MANIFEST="${SHARE_DIR}/install.manifest"
 }
 
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}asr installer${nc}"
+  echo -e "${bold}asryx installer${nc}"
   echo
   echo "prefix:     ${PREFIX}"
   echo "repo:       ${ENGINE_REPO_URL}"
@@ -232,9 +231,9 @@ print_plan() {
   echo "  - clone/update engine repo and hard-checkout pinned commit"
   echo "  - build Release engine"
   echo "  - install engine binaries into <prefix>/bin"
-  echo "  - install toggle into <prefix>/bin/asr-toggle"
-  echo "  - install model into <prefix>/share/asr/models (unless --no-model)"
-  echo "  - write <prefix>/share/asr/asr.env contract"
+  echo "  - install toggle into <prefix>/bin/asryx"
+  echo "  - install model into <prefix>/share/asryx/models (unless --no-model)"
+  echo "  - write <prefix>/share/asryx/asryx.env contract"
   echo "  - write manifest for safe uninstall"
   echo
   echo "will NOT do:"
@@ -347,10 +346,13 @@ install_toggle() {
   step "install (toggle)"
   mkdir -p "${BIN_DIR}"
 
-  local src="${SCRIPT_DIR}/toggle"
-  [ -f "${src}" ] || die "toggle file not found next to installer: ${src}"
+  local src="${SCRIPT_DIR}/asryx"
+  if [ ! -f "${src}" ]; then
+    src="${SCRIPT_DIR}/toggle"
+  fi
+  [ -f "${src}" ] || die "toggle file not found next to installer (expected asryx or toggle): ${SCRIPT_DIR}"
 
-  local dst="${BIN_DIR}/asr-toggle"
+  local dst="${BIN_DIR}/asryx"
   install -m 0755 "${src}" "${dst}"
   ok "installed: ${dst}"
 }
@@ -360,10 +362,21 @@ write_env_contract() {
   mkdir -p "${SHARE_DIR}"
 
   local engine="${BIN_DIR}/whisper-cli"
-  local toggle="${BIN_DIR}/asr-toggle"
+  local toggle="${BIN_DIR}/asryx"
   local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
 
   {
+    echo "ASRYX_PREFIX=${PREFIX}"
+    echo "ASRYX_ENGINE=${engine}"
+    if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model}" ]; then
+      echo "ASRYX_MODEL=${model}"
+      echo "ASRYX_MODEL_SLUG=${MODEL_SLUG}"
+    else
+      echo "ASRYX_MODEL="
+      echo "ASRYX_MODEL_SLUG=${MODEL_SLUG}"
+    fi
+    echo "ASRYX_TOGGLE=${toggle}"
+
     echo "ASR_PREFIX=${PREFIX}"
     echo "ASR_ENGINE=${engine}"
     if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model}" ]; then
@@ -385,7 +398,7 @@ write_manifest() {
 
   local engine="${BIN_DIR}/whisper-cli"
   local stream="${BIN_DIR}/whisper-stream"
-  local toggle="${BIN_DIR}/asr-toggle"
+  local toggle="${BIN_DIR}/asryx"
   local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
 
   {
@@ -434,7 +447,7 @@ verify_install() {
   step "verify"
   [ -x "${BIN_DIR}/whisper-cli" ] || die "missing: ${BIN_DIR}/whisper-cli"
   "${BIN_DIR}/whisper-cli" --help >/dev/null 2>&1 || die "whisper-cli failed to run"
-  [ -x "${BIN_DIR}/asr-toggle" ] || die "missing: ${BIN_DIR}/asr-toggle"
+  [ -x "${BIN_DIR}/asryx" ] || die "missing: ${BIN_DIR}/asryx"
   ok "engine ok"
   ok "toggle ok"
 
@@ -447,7 +460,7 @@ verify_install() {
   echo
   hr
   echo -e "${bold}hyprland example:${nc}"
-  echo "  bind = ALT, W, exec, asr-toggle"
+  echo "  bind = ALT, W, exec, asryx"
   hr
 }
 
@@ -470,7 +483,7 @@ main() {
   write_manifest
   verify_install
   step "done"
-  ok "installed asr"
+  ok "installed asryx"
   ok "log: ${LOG_FILE}"
 }
 

@@ -6,7 +6,7 @@ umask 022
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 
-APP_ID="asr"
+APP_ID="asryx"
 PREFIX_DEFAULT="${HOME}/.local"
 
 AUTO_YES=0
@@ -54,7 +54,7 @@ defaults:
 
 behavior:
   - removes engine binaries only if they match manifest (or if --force)
-  - removes asr-toggle only if it matches manifest (or if --force)
+  - removes asryx only if it matches manifest (or if --force)
   - removes env contract only if it matches manifest (or if --force)
   - removes recorded model (auto) unless keep-models
   - removes manifest and prunes empty share dirs
@@ -115,7 +115,7 @@ set_paths() {
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
-  ENV_FILE="${SHARE_DIR}/asr.env"
+  ENV_FILE="${SHARE_DIR}/asryx.env"
   MANIFEST="${SHARE_DIR}/install.manifest"
   WORKSPACE="${PREFIX}/opt/whisper.cpp"
 }
@@ -141,7 +141,7 @@ confirm_plan() {
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}asr uninstaller${nc}"
+  echo -e "${bold}asryx uninstaller${nc}"
   echo
   echo "prefix:      ${PREFIX}"
   echo "bin dir:     ${BIN_DIR}"
@@ -319,10 +319,10 @@ main() {
   step "remove (bin)"
   remove_file_if_matches_manifest "${engine_cli_path:-${BIN_DIR}/whisper-cli}" "${engine_cli_sha}" "whisper-cli"
   remove_file_if_matches_manifest "${engine_stream_path:-${BIN_DIR}/whisper-stream}" "${engine_stream_sha}" "whisper-stream"
-  remove_file_if_matches_manifest "${toggle_path:-${BIN_DIR}/asr-toggle}" "${toggle_sha}" "asr-toggle"
+  remove_file_if_matches_manifest "${toggle_path:-${BIN_DIR}/asryx}" "${toggle_sha}" "asryx"
 
   step "remove (env)"
-  remove_file_if_matches_manifest "${env_path:-${ENV_FILE}}" "${env_sha}" "asr.env"
+  remove_file_if_matches_manifest "${env_path:-${ENV_FILE}}" "${env_sha}" "asryx.env"
 
   step "remove (models)"
   if [ -f "${MANIFEST}" ] || [ "${FORCE}" -eq 1 ]; then
