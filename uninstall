@@ -12,8 +12,8 @@ PREFIX_DEFAULT="${HOME}/.local"
 AUTO_YES=0
 PREFIX="${PREFIX_DEFAULT}"
 
-PURGE_WORKSPACE_MODE="auto"   # auto | yes | no
-PURGE_MODELS_MODE="auto"      # auto | yes | no
+PURGE_WORKSPACE_MODE="auto"
+PURGE_MODELS_MODE="auto"
 FORCE=0
 
 if [ -t 1 ]; then
@@ -263,7 +263,8 @@ workspace_looks_like_ours() {
   local url
   url="$(git -C "${WORKSPACE}" config --get remote.origin.url 2>/dev/null || true)"
   case "${url}" in
-    *ggml-org/whisper.cpp.git|*github.com/ggml-org/whisper.cpp.git|*github.com:ggml-org/whisper.cpp.git) return 0 ;;
+    *github.com/ggml-org/whisper.cpp.git|*github.com:ggml-org/whisper.cpp.git) return 0 ;;
+    *github.com/ggml-org/whisper.cpp|*github.com:ggml-org/whisper.cpp) return 0 ;;
     *) return 1 ;;
   esac
 }

@@ -10,7 +10,7 @@ APP_ID="whisper"
 REPO_URL_DEFAULT="https://github.com/ggml-org/whisper.cpp.git"
 
 PREFIX_DEFAULT="${HOME}/.local"
-ROOT_DEFAULT="${PREFIX_DEFAULT}/opt/whisper.cpp"
+ROOT_DEFAULT=""
 BUILD_SUBDIR="build"
 
 SHA_DEFAULT="040510a132f0a9b51d4692b57a6abfd8c9660696"
@@ -188,7 +188,8 @@ sha256() { sha256sum "$1" | awk '{print $1}'; }
 
 set_paths() {
   [ -n "${PREFIX}" ] || die "prefix empty"
-  ROOT="${PREFIX}/opt/whisper.cpp"
+  ROOT_DEFAULT="${PREFIX}/opt/whisper.cpp"
+  ROOT="${ROOT_DEFAULT}"
   BUILD="${ROOT}/${BUILD_SUBDIR}"
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
