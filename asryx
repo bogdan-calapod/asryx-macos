@@ -1,4 +1,3 @@
-# asryx (this replaces the old "toggle" script; installer also accepts "toggle" as a fallback)
 #!/usr/bin/env zsh
 setopt errexit nounset pipefail
 
