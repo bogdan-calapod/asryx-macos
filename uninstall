@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+
+set -Eeuo pipefail
+umask 022
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+
+APP_ID="whisper"
+PREFIX_DEFAULT="${HOME}/.local"
+
+AUTO_YES=0
+PREFIX="${PREFIX_DEFAULT}"
+
+PURGE_WORKSPACE_MODE="auto"   # auto | yes | no
+PURGE_MODELS_MODE="auto"      # auto | yes | no
+FORCE=0
+
+if [ -t 1 ]; then
+  red='\033[0;31m'
+  green='\033[0;32m'
+  yellow='\033[0;33m'
+  blue='\033[0;34m'
+  magenta='\033[0;35m'
+  cyan='\033[0;36m'
+  bold='\033[1m'
+  dim='\033[2m'
+  nc='\033[0m'
+else
+  red=''; green=''; yellow=''; blue=''; magenta=''; cyan=''; bold=''; dim=''; nc=''
+fi
+
+die() { echo -e "${red}${bold}error:${nc} $*" >&2; exit 1; }
+ok() { echo -e "${green}${bold}✔${nc} $*"; }
+warn() { echo -e "${yellow}${bold}⚠${nc} $*"; }
+info() { echo -e "${blue}${bold}i${nc} $*"; }
+step() { echo -e "\n${magenta}${bold}==>${nc} $*"; }
+hr() { echo -e "${cyan}${dim}------------------------------------------------------------${nc}"; }
+
+LOG_FILE=""
+
+usage() {
+  cat <<'EOF'
+usage:
+  ./uninstall [--yes|-y] [--prefix <path>]
+              [--purge-workspace|--keep-workspace]
+              [--purge-models|--keep-models]
+              [--force] [--help]
+
+defaults:
+  --prefix $HOME/.local
+  purge-workspace: auto (only if it looks like the install workspace)
+  purge-models:    auto (only models recorded in manifest)
+
+behavior:
+  - removes <prefix>/bin/whisper-cli if it matches manifest
+  - removes <prefix>/bin/whisper-stream if it matches manifest
+  - removes model recorded in manifest (auto mode) unless keep-models
+  - removes manifest and share dir (if empty)
+  - optionally removes workspace <prefix>/opt/whisper.cpp (auto-safe)
+  - does not touch apt packages
+EOF
+}
+
+parse_args() {
+  while [ "${#}" -gt 0 ]; do
+    case "$1" in
+      --yes|-y) AUTO_YES=1 ;;
+      --prefix) PREFIX="${2:-}"; [ -n "${PREFIX}" ] || die "missing value for --prefix"; shift ;;
+      --purge-workspace) PURGE_WORKSPACE_MODE="yes" ;;
+      --keep-workspace) PURGE_WORKSPACE_MODE="no" ;;
+      --purge-models) PURGE_MODELS_MODE="yes" ;;
+      --keep-models) PURGE_MODELS_MODE="no" ;;
+      --force) FORCE=1 ;;
+      --help|-h) usage; exit 0 ;;
+      *) die "unknown arg: $1 (try --help)" ;;
+    esac
+    shift
+  done
+}
+
+log_setup() {
+  local cache_dir log_dir
+  cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}"
+  log_dir="${cache_dir}/${APP_ID}"
+  mkdir -p "${log_dir}"
+  LOG_FILE="${log_dir}/uninstall-${timestamp}.log"
+  exec > >(tee -a "${LOG_FILE}") 2>&1
+  info "log: ${LOG_FILE}"
+}
+
+on_err() {
+  local code="$?"
+  local line="${BASH_LINENO[0]:-?}"
+  local cmd="${BASH_COMMAND:-?}"
+  echo
+  warn "failed (exit ${code})"
+  warn "at line: ${line}"
+  warn "cmd: ${cmd}"
+  warn "log: ${LOG_FILE}"
+  exit "${code}"
+}
+
+sha256() { sha256sum "$1" | awk '{print $1}'; }
+
+set_paths() {
+  BIN_DIR="${PREFIX}/bin"
+  SHARE_DIR="${PREFIX}/share/${APP_ID}"
+  MODELS_DIR="${SHARE_DIR}/models"
+  MANIFEST="${SHARE_DIR}/install.manifest"
+  WORKSPACE="${PREFIX}/opt/whisper.cpp"
+}
+
+mget() {
+  local key="$1" file="$2"
+  awk -F= -v k="$key" '$1==k {sub($1"=",""); print; exit}' "${file}" 2>/dev/null || true
+}
+
+confirm_plan() {
+  if [ "${AUTO_YES}" -eq 1 ]; then
+    ok "auto mode: skipping confirmation (--yes/-y)"
+    return 0
+  fi
+  echo
+  info "type ${bold}y${nc} to uninstall"
+  printf "%buninstall now?%b " "${cyan}" "${nc}"
+  local ans
+  IFS= read -r ans || true
+  [ "${ans:-}" = "y" ] || die "aborted"
+}
+
+print_plan() {
+  step "plan"
+  hr
+  echo -e "${bold}whisper engine uninstaller${nc}"
+  echo
+  echo "prefix:      ${PREFIX}"
+  echo "bin dir:     ${BIN_DIR}"
+  echo "share dir:   ${SHARE_DIR}"
+  echo "models dir:  ${MODELS_DIR}"
+  echo "manifest:    ${MANIFEST}"
+  echo "workspace:   ${WORKSPACE}"
+  echo "purge ws:    ${PURGE_WORKSPACE_MODE}"
+  echo "purge models:${PURGE_MODELS_MODE}"
+  echo "force:       $([ "${FORCE}" -eq 1 ] && echo yes || echo no)"
+  hr
+  echo "will do:"
+  echo "  - remove binaries only if they match manifest (or if --force)"
+  echo "  - remove recorded model only (auto) unless keep-models"
+  echo "  - remove manifest and prune empty share dirs"
+  echo "  - optionally remove workspace (auto-safe) unless keep-workspace"
+  echo
+  echo "will NOT do:"
+  echo "  - remove apt packages"
+  echo "  - touch shell rc files or any personal workflow repo"
+  hr
+}
+
+remove_file_if_matches_manifest() {
+  local path="$1" expected_sha="$2" label="$3"
+  if [ ! -e "${path}" ] && [ ! -L "${path}" ]; then
+    ok "${label}: not present (skipping)"
+    return 0
+  fi
+
+  if [ "${FORCE}" -eq 1 ]; then
+    rm -f "${path}"
+    ok "${label}: removed (--force)"
+    return 0
+  fi
+
+  if [ -z "${expected_sha}" ]; then
+    warn "${label}: no manifest sha; leaving in place: ${path}"
+    return 0
+  fi
+
+  if [ ! -f "${path}" ]; then
+    warn "${label}: not a regular file; leaving in place: ${path}"
+    return 0
+  fi
+
+  local got
+  got="$(sha256 "${path}")"
+  if [ "${got}" != "${expected_sha}" ]; then
+    warn "${label}: sha mismatch; leaving in place"
+    warn "expected: ${expected_sha}"
+    warn "got:      ${got}"
+    warn "path:     ${path}"
+    return 0
+  fi
+
+  rm -f "${path}"
+  ok "${label}: removed"
+}
+
+remove_model_auto_safe() {
+  local model_path="$1" model_sha="$2"
+  [ -n "${model_path}" ] || return 0
+  [ -e "${model_path}" ] || { ok "model: not present (skipping)"; return 0; }
+
+  if [ "${PURGE_MODELS_MODE}" = "no" ]; then
+    ok "models: keep-models (leaving)"
+    return 0
+  fi
+
+  if [ "${PURGE_MODELS_MODE}" = "yes" ]; then
+    rm -f "${model_path}"
+    ok "model: removed (forced purge)"
+    return 0
+  fi
+
+  if [ "${FORCE}" -eq 1 ]; then
+    rm -f "${model_path}"
+    ok "model: removed (--force)"
+    return 0
+  fi
+
+  if [ -z "${model_sha}" ]; then
+    warn "model: no manifest sha; leaving in place"
+    return 0
+  fi
+
+  if [ ! -f "${model_path}" ]; then
+    warn "model: not a regular file; leaving in place"
+    return 0
+  fi
+
+  local got
+  got="$(sha256 "${model_path}")"
+  if [ "${got}" != "${model_sha}" ]; then
+    warn "model: sha mismatch; leaving in place"
+    warn "expected: ${model_sha}"
+    warn "got:      ${got}"
+    warn "path:     ${model_path}"
+    return 0
+  fi
+
+  rm -f "${model_path}"
+  ok "model: removed"
+}
+
+prune_empty_dirs() {
+  local dir="$1"
+  [ -d "${dir}" ] || return 0
+  rmdir "${dir}" 2>/dev/null || true
+}
+
+remove_manifest_and_prune() {
+  step "remove (manifest)"
+  if [ -f "${MANIFEST}" ]; then
+    rm -f "${MANIFEST}"
+    ok "removed manifest"
+  else
+    ok "manifest not present (skipping)"
+  fi
+  prune_empty_dirs "${MODELS_DIR}"
+  prune_empty_dirs "${SHARE_DIR}"
+  prune_empty_dirs "${PREFIX}/share"
+}
+
+workspace_looks_like_ours() {
+  [ -d "${WORKSPACE}/.git" ] || return 1
+  local url
+  url="$(git -C "${WORKSPACE}" config --get remote.origin.url 2>/dev/null || true)"
+  case "${url}" in
+    *ggml-org/whisper.cpp.git|*github.com/ggml-org/whisper.cpp.git|*github.com:ggml-org/whisper.cpp.git) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+remove_workspace_auto_safe() {
+  step "remove (workspace)"
+  if [ "${PURGE_WORKSPACE_MODE}" = "no" ]; then
+    ok "workspace: keep-workspace (leaving)"
+    return 0
+  fi
+
+  if [ ! -d "${WORKSPACE}" ]; then
+    ok "workspace not present (skipping)"
+    return 0
+  fi
+
+  if [ "${PURGE_WORKSPACE_MODE}" = "yes" ]; then
+    rm -rf "${WORKSPACE}"
+    ok "workspace removed (forced purge)"
+    return 0
+  fi
+
+  if [ "${FORCE}" -eq 1 ]; then
+    rm -rf "${WORKSPACE}"
+    ok "workspace removed (--force)"
+    return 0
+  fi
+
+  if workspace_looks_like_ours; then
+    rm -rf "${WORKSPACE}"
+    ok "workspace removed (auto-safe)"
+  else
+    warn "workspace does not look like a whisper.cpp clone; leaving in place"
+    warn "path: ${WORKSPACE}"
+  fi
+}
+
+main() {
+  trap on_err ERR
+  parse_args "$@"
+  log_setup
+  set_paths
+  print_plan
+  confirm_plan
+
+  step "read manifest"
+  if [ ! -f "${MANIFEST}" ] && [ "${FORCE}" -ne 1 ]; then
+    warn "manifest not found at ${MANIFEST}"
+    warn "refusing to remove binaries without proof (use --force if you insist)"
+  fi
+
+  local cli_path cli_sha stream_path stream_sha model_path model_sha
+  cli_path="$(mget cli_path "${MANIFEST}")"
+  cli_sha="$(mget cli_sha256 "${MANIFEST}")"
+  stream_path="$(mget stream_path "${MANIFEST}")"
+  stream_sha="$(mget stream_sha256 "${MANIFEST}")"
+  model_path="$(mget model_path "${MANIFEST}")"
+  model_sha="$(mget model_sha256 "${MANIFEST}")"
+
+  step "remove (bin)"
+  if [ -n "${cli_path}" ]; then
+    remove_file_if_matches_manifest "${cli_path}" "${cli_sha}" "whisper-cli"
+  else
+    remove_file_if_matches_manifest "${BIN_DIR}/whisper-cli" "${cli_sha}" "whisper-cli"
+  fi
+
+  if [ -n "${stream_path}" ]; then
+    remove_file_if_matches_manifest "${stream_path}" "${stream_sha}" "whisper-stream"
+  else
+    remove_file_if_matches_manifest "${BIN_DIR}/whisper-stream" "${stream_sha}" "whisper-stream"
+  fi
+
+  step "remove (models)"
+  if [ -f "${MANIFEST}" ] || [ "${FORCE}" -eq 1 ]; then
+    remove_model_auto_safe "${model_path}" "${model_sha}"
+  else
+    ok "models: no manifest (skipping)"
+  fi
+
+  remove_manifest_and_prune
+  remove_workspace_auto_safe
+
+  step "done"
+  ok "uninstall finished"
+  ok "log: ${LOG_FILE}"
+}
+
+main "$@"
+

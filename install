@@ -1,0 +1,419 @@
+#!/usr/bin/env bash
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+
+set -Eeuo pipefail
+umask 022
+
+timestamp="$(date +%Y%m%d-%H%M%S)"
+
+APP_ID="whisper"
+REPO_URL_DEFAULT="https://github.com/ggml-org/whisper.cpp.git"
+
+PREFIX_DEFAULT="${HOME}/.local"
+ROOT_DEFAULT="${PREFIX_DEFAULT}/opt/whisper.cpp"
+BUILD_SUBDIR="build"
+
+SHA_DEFAULT="040510a132f0a9b51d4692b57a6abfd8c9660696"
+MODEL_DEFAULT="base.en"
+
+AUTO_YES=0
+WITH_MODEL=1
+MODEL_SLUG="${MODEL_DEFAULT}"
+SHA="${SHA_DEFAULT}"
+REPO_URL="${REPO_URL_DEFAULT}"
+PREFIX="${PREFIX_DEFAULT}"
+ROOT=""
+BUILD=""
+BIN_DIR=""
+SHARE_DIR=""
+MODELS_DIR=""
+MANIFEST=""
+FORCE=0
+CLEAN_BUILD=0
+
+APT_PKGS=(
+  ca-certificates
+  curl
+  git
+  build-essential
+  cmake
+  pkg-config
+  ninja-build
+)
+
+if [ -t 1 ]; then
+  red='\033[0;31m'
+  green='\033[0;32m'
+  yellow='\033[0;33m'
+  blue='\033[0;34m'
+  magenta='\033[0;35m'
+  cyan='\033[0;36m'
+  bold='\033[1m'
+  dim='\033[2m'
+  nc='\033[0m'
+else
+  red=''; green=''; yellow=''; blue=''; magenta=''; cyan=''; bold=''; dim=''; nc=''
+fi
+
+need_sudo() { if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo sudo; fi; }
+die() { echo -e "${red}${bold}error:${nc} $*" >&2; exit 1; }
+ok() { echo -e "${green}${bold}✔${nc} $*"; }
+warn() { echo -e "${yellow}${bold}⚠${nc} $*"; }
+info() { echo -e "${blue}${bold}i${nc} $*"; }
+step() { echo -e "\n${magenta}${bold}==>${nc} $*"; }
+hr() { echo -e "${cyan}${dim}------------------------------------------------------------${nc}"; }
+
+LOG_FILE=""
+
+usage() {
+  cat <<'EOF'
+usage:
+  ./install [--yes|-y] [--prefix <path>] [--repo <url>] [--sha <commit>] [--model <slug>]
+            [--no-model] [--clean-build] [--force] [--help]
+
+defaults:
+  --prefix   $HOME/.local
+  --repo     https://github.com/ggml-org/whisper.cpp.git
+  --sha      pinned commit for reproducibility
+  --model    base.en
+  (models are installed unless --no-model)
+
+behavior:
+  - installs build deps via apt
+  - clones/updates repo into <prefix>/opt/whisper.cpp at the pinned sha
+  - builds Release engine
+  - installs stable binaries into <prefix>/bin: whisper-cli (and whisper-stream if built)
+  - optionally installs a ggml model into <prefix>/share/whisper/models
+  - writes a manifest to <prefix>/share/whisper/install.manifest
+
+notes:
+  - no shell rc edits, no functions, no keybinds, no recorder, no clipboard glue
+  - uninstall is manifest-driven and safe by default
+EOF
+}
+
+parse_args() {
+  while [ "${#}" -gt 0 ]; do
+    case "$1" in
+      --yes|-y) AUTO_YES=1 ;;
+      --prefix) PREFIX="${2:-}"; [ -n "${PREFIX}" ] || die "missing value for --prefix"; shift ;;
+      --repo) REPO_URL="${2:-}"; [ -n "${REPO_URL}" ] || die "missing value for --repo"; shift ;;
+      --sha) SHA="${2:-}"; [ -n "${SHA}" ] || die "missing value for --sha"; shift ;;
+      --model) MODEL_SLUG="${2:-}"; [ -n "${MODEL_SLUG}" ] || die "missing value for --model"; shift ;;
+      --no-model) WITH_MODEL=0 ;;
+      --clean-build) CLEAN_BUILD=1 ;;
+      --force) FORCE=1 ;;
+      --help|-h) usage; exit 0 ;;
+      *) die "unknown arg: $1 (try --help)" ;;
+    esac
+    shift
+  done
+}
+
+log_setup() {
+  local cache_dir log_dir
+  cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}"
+  log_dir="${cache_dir}/${APP_ID}"
+  mkdir -p "${log_dir}"
+  LOG_FILE="${log_dir}/install-${timestamp}.log"
+  exec > >(tee -a "${LOG_FILE}") 2>&1
+  info "log: ${LOG_FILE}"
+}
+
+on_err() {
+  local code="$?"
+  local line="${BASH_LINENO[0]:-?}"
+  local cmd="${BASH_COMMAND:-?}"
+  echo
+  warn "failed (exit ${code})"
+  warn "at line: ${line}"
+  warn "cmd: ${cmd}"
+  warn "log: ${LOG_FILE}"
+  exit "${code}"
+}
+
+require_debian() {
+  command -v apt-get >/dev/null 2>&1 || die "debian-only installer: apt-get not found"
+  command -v dpkg >/dev/null 2>&1 || die "debian-only installer: dpkg not found"
+}
+
+confirm_plan() {
+  if [ "${AUTO_YES}" -eq 1 ]; then
+    ok "auto mode: skipping confirmation (--yes/-y)"
+    return 0
+  fi
+  echo
+  info "this will install packages via apt and write under: ${PREFIX}"
+  info "type ${bold}y${nc} to proceed"
+  printf "%bproceed?%b " "${cyan}" "${nc}"
+  local ans
+  IFS= read -r ans || true
+  [ "${ans:-}" = "y" ] || die "aborted"
+}
+
+sudo_warmup() {
+  step "sudo"
+  if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    warn "running as root is not recommended"
+    [ "${FORCE}" -eq 1 ] || die "refusing to run as root (use --force if you really want this)"
+    ok "root allowed (--force)"
+    return 0
+  fi
+  info "sudo is required for apt"
+  if sudo -n true >/dev/null 2>&1; then
+    ok "sudo: non-interactive ok"
+    return 0
+  fi
+  sudo -v || die "sudo auth failed"
+  ok "sudo ok"
+}
+
+pkg_installed() { dpkg -s "$1" >/dev/null 2>&1; }
+
+apt_install_missing() {
+  local pkgs=() p
+  for p in "$@"; do pkg_installed "$p" || pkgs+=("$p"); done
+  if [ "${#pkgs[@]}" -eq 0 ]; then
+    ok "deps already present"
+    return 0
+  fi
+  step "deps"
+  info "installing: ${pkgs[*]}"
+  $(need_sudo) apt-get update -y
+  $(need_sudo) apt-get install -y --no-install-recommends "${pkgs[@]}"
+  ok "deps installed"
+}
+
+sha256() { sha256sum "$1" | awk '{print $1}'; }
+
+set_paths() {
+  [ -n "${PREFIX}" ] || die "prefix empty"
+  ROOT="${PREFIX}/opt/whisper.cpp"
+  BUILD="${ROOT}/${BUILD_SUBDIR}"
+  BIN_DIR="${PREFIX}/bin"
+  SHARE_DIR="${PREFIX}/share/${APP_ID}"
+  MODELS_DIR="${SHARE_DIR}/models"
+  MANIFEST="${SHARE_DIR}/install.manifest"
+}
+
+print_plan() {
+  step "plan"
+  hr
+  echo -e "${bold}whisper engine installer${nc}"
+  echo
+  echo "prefix:     ${PREFIX}"
+  echo "repo:       ${REPO_URL}"
+  echo "commit:     ${SHA}"
+  echo "workspace:  ${ROOT}"
+  echo "build dir:  ${BUILD}"
+  echo "bin dir:    ${BIN_DIR}"
+  echo "share dir:  ${SHARE_DIR}"
+  echo "models dir: ${MODELS_DIR}"
+  echo "manifest:   ${MANIFEST}"
+  echo "model:      $([ "${WITH_MODEL}" -eq 1 ] && echo "${MODEL_SLUG}" || echo "none")"
+  echo "clean:      $([ "${CLEAN_BUILD}" -eq 1 ] && echo "yes" || echo "no")"
+  hr
+  echo "will do:"
+  echo "  - install build deps (apt)"
+  echo "  - clone/update repo and hard-checkout pinned commit"
+  echo "  - build Release binaries"
+  echo "  - install stable binaries into <prefix>/bin"
+  if [ "${WITH_MODEL}" -eq 1 ]; then
+    echo "  - install model into <prefix>/share/${APP_ID}/models"
+  fi
+  echo "  - write manifest for safe uninstall"
+  echo
+  echo "will NOT do:"
+  echo "  - modify shell rc files"
+  echo "  - install any keybind/toggle/recorder/clipboard workflow"
+  echo "  - run daemons or background services"
+  hr
+}
+
+clone_or_update() {
+  step "source"
+  mkdir -p "${PREFIX}/opt"
+  if [ -d "${ROOT}/.git" ]; then
+    ok "repo exists: ${ROOT}"
+    git -C "${ROOT}" fetch --all --tags --prune
+  else
+    ok "cloning: ${REPO_URL} -> ${ROOT}"
+    git clone "${REPO_URL}" "${ROOT}"
+  fi
+
+  git -C "${ROOT}" cat-file -e "${SHA}^{commit}" 2>/dev/null || die "commit not found: ${SHA}"
+  git -C "${ROOT}" checkout -f "${SHA}"
+  git -C "${ROOT}" reset --hard "${SHA}"
+  git -C "${ROOT}" submodule update --init --recursive
+  ok "source pinned: ${SHA}"
+}
+
+build_release() {
+  step "build"
+  if [ "${CLEAN_BUILD}" -eq 1 ] && [ -d "${BUILD}" ]; then
+    info "clean build requested"
+    rm -rf "${BUILD}"
+  fi
+  mkdir -p "${BUILD}"
+  cmake -S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release >/dev/null
+  cmake --build "${BUILD}" --parallel "$(nproc)" >/dev/null
+  local cli="${BUILD}/bin/whisper-cli"
+  [ -x "${cli}" ] || die "build did not produce whisper-cli at ${cli}"
+  ok "built whisper-cli"
+  if [ -x "${BUILD}/bin/whisper-stream" ]; then
+    ok "built whisper-stream"
+  else
+    warn "whisper-stream not built (ok)"
+  fi
+}
+
+install_binaries_atomic() {
+  step "install (bin)"
+  mkdir -p "${BIN_DIR}"
+
+  local stage="${BIN_DIR}/.${APP_ID}.stage.${timestamp}"
+  mkdir -p "${stage}"
+
+  local cli_src="${BUILD}/bin/whisper-cli"
+  local cli_dst="${BIN_DIR}/whisper-cli"
+  local cli_bak="${BIN_DIR}/.whisper-cli.bak.${timestamp}"
+
+  [ -x "${cli_src}" ] || die "missing built binary: ${cli_src}"
+  install -m 0755 "${cli_src}" "${stage}/whisper-cli"
+
+  if [ -f "${cli_dst}" ] || [ -L "${cli_dst}" ]; then
+    mv -f "${cli_dst}" "${cli_bak}" || true
+  fi
+  mv -f "${stage}/whisper-cli" "${cli_dst}"
+  rm -rf "${stage}" >/dev/null 2>&1 || true
+  rm -f "${cli_bak}" >/dev/null 2>&1 || true
+  ok "installed: ${cli_dst}"
+
+  if [ -x "${BUILD}/bin/whisper-stream" ]; then
+    local stream_src="${BUILD}/bin/whisper-stream"
+    local stream_dst="${BIN_DIR}/whisper-stream"
+    local stream_bak="${BIN_DIR}/.whisper-stream.bak.${timestamp}"
+    local stage2="${BIN_DIR}/.${APP_ID}.stage2.${timestamp}"
+    mkdir -p "${stage2}"
+    install -m 0755 "${stream_src}" "${stage2}/whisper-stream"
+    if [ -f "${stream_dst}" ] || [ -L "${stream_dst}" ]; then
+      mv -f "${stream_dst}" "${stream_bak}" || true
+    fi
+    mv -f "${stage2}/whisper-stream" "${stream_dst}"
+    rm -rf "${stage2}" >/dev/null 2>&1 || true
+    rm -f "${stream_bak}" >/dev/null 2>&1 || true
+    ok "installed: ${stream_dst}"
+  fi
+}
+
+download_model_if_enabled() {
+  [ "${WITH_MODEL}" -eq 1 ] || return 0
+  step "install (model)"
+
+  mkdir -p "${MODELS_DIR}"
+  local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+
+  if [ -s "${model_file}" ]; then
+    ok "model already present: $(basename "${model_file}")"
+    return 0
+  fi
+
+  local dl="${ROOT}/models/download-ggml-model.sh"
+  [ -f "${dl}" ] || die "missing model downloader: ${dl}"
+
+  info "downloading: ${MODEL_SLUG}"
+  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" "${MODELS_DIR}" )
+  [ -s "${model_file}" ] || die "model download failed: ${model_file}"
+  ok "model installed: $(basename "${model_file}")"
+}
+
+write_manifest() {
+  step "manifest"
+  mkdir -p "${SHARE_DIR}"
+
+  local cli_dst="${BIN_DIR}/whisper-cli"
+  local stream_dst="${BIN_DIR}/whisper-stream"
+  local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+
+  {
+    echo "app_id=${APP_ID}"
+    echo "timestamp=${timestamp}"
+    echo "prefix=${PREFIX}"
+    echo "repo_url=${REPO_URL}"
+    echo "sha=${SHA}"
+    echo "workspace=${ROOT}"
+    echo "build_dir=${BUILD}"
+    echo "bin_dir=${BIN_DIR}"
+    echo "share_dir=${SHARE_DIR}"
+    echo "models_dir=${MODELS_DIR}"
+    echo "cli_path=${cli_dst}"
+    echo "cli_sha256=$(sha256 "${cli_dst}")"
+    if [ -x "${stream_dst}" ]; then
+      echo "stream_path=${stream_dst}"
+      echo "stream_sha256=$(sha256 "${stream_dst}")"
+    else
+      echo "stream_path="
+      echo "stream_sha256="
+    fi
+    if [ "${WITH_MODEL}" -eq 1 ] && [ -s "${model_file}" ]; then
+      echo "model_slug=${MODEL_SLUG}"
+      echo "model_path=${model_file}"
+      echo "model_sha256=$(sha256 "${model_file}")"
+    else
+      echo "model_slug="
+      echo "model_path="
+      echo "model_sha256="
+    fi
+  } > "${MANIFEST}"
+
+  ok "wrote: ${MANIFEST}"
+}
+
+verify_install() {
+  step "verify"
+  [ -x "${BIN_DIR}/whisper-cli" ] || die "missing: ${BIN_DIR}/whisper-cli"
+  "${BIN_DIR}/whisper-cli" --help >/dev/null 2>&1 || die "whisper-cli failed to run"
+  ok "engine ok"
+
+  if [ "${WITH_MODEL}" -eq 1 ]; then
+    local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+    [ -s "${model_file}" ] || die "missing model: ${model_file}"
+    ok "model ok"
+  fi
+
+  echo
+  hr
+  echo -e "${bold}installed engine surface:${nc}"
+  echo "  ${BIN_DIR}/whisper-cli"
+  if [ -x "${BIN_DIR}/whisper-stream" ]; then
+    echo "  ${BIN_DIR}/whisper-stream"
+  fi
+  echo
+  echo -e "${bold}manifest:${nc}"
+  echo "  ${MANIFEST}"
+  hr
+}
+
+main() {
+  trap on_err ERR
+  parse_args "$@"
+  log_setup
+  require_debian
+  set_paths
+  print_plan
+  confirm_plan
+  sudo_warmup
+  apt_install_missing "${APT_PKGS[@]}"
+  clone_or_update
+  build_release
+  install_binaries_atomic
+  download_model_if_enabled
+  write_manifest
+  verify_install
+  step "done"
+  ok "installed whisper engine"
+  ok "log: ${LOG_FILE}"
+}
+
+main "$@"
+
