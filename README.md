@@ -1,31 +1,40 @@
 # asr
 
-A single toggle that turns your voice into text.
+Turns your voice into text, offline, on Linux.
 
 Run it once: it records.
 Run it again: it stops, transcribes, copies to clipboard, and notifies.
 
-This repo ships the whole surface: engine install, models, and the toggle script. Hyprland is assumed to already exist if you want a keybind, but nothing here edits your dotfiles or compositor config.
+This repo ships the whole surface: engine install, models, and the toggle script. You're free to hookup keybinds, scripts whatever, this provides you eveyrthing you need and more, but nothing here edits your dotfiles or compositor config.
 
 ## install
 
 Clone, then run the installer.
 
 ```sh
-git clone https://github.com/rccyx/asr.git
-cd asr
 bash ./install --yes
-````
+```
 
+That's it, run `asr-toggle` once, you'll get a notification talk, run it again, you'll get text copied to your clipboard, you'll get a notification.
+
+Read more below to learn how it works & how you can hook it up.
+
+## Setup
 By default it installs under `$HOME/.local`.
 
 After install you should have:
 
-`$HOME/.local/bin/asr-toggle`
-`$HOME/.local/bin/whisper-cli`
-`$HOME/.local/share/asr/models/ggml-<model>.bin`
-`$HOME/.local/share/asr/asr.env`
-`$HOME/.local/share/asr/install.manifest`
+```bash
+~/.local/bin/whisper-cli        ← engine
+~/.local/bin/asr-toggle         ← toggle
+~/.local/share/asr/models/...   ← model
+~/.local/share/asr/asr.env      ← contract
+~/.local/share/asr/install.manifest
+~/.local/opt/whisper.cpp        ← build workspace
+```
+
+> [!NOTE]
+> It uses Whisper, but the backend is swappable, whisper today, somthing else tmorrow, the thing is, it will always work.
 
 ## use
 
