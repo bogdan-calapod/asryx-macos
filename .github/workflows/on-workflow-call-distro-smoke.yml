@@ -10,7 +10,6 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +60,11 @@ jobs:
           mkdir -p /home/ci/.cache /home/ci/.local
           chown -R ci:ci /home/ci
 
+      - name: sanity check sudo for ci
+        run: |
+          set -eux
+          sudo -u ci -H bash -lc 'set -euo pipefail; sudo -n true'
+
       - name: checkout
         uses: actions/checkout@v4
         with:
@@ -87,11 +91,13 @@ jobs:
         run: |
           set -eux
           test -x /home/ci/.local/bin/whisper-cli
-          test -f /home/ci/.local/share/whisper/install.manifest
-          test -f /home/ci/.local/share/whisper/models/ggml-base.en.bin
+          test -x /home/ci/.local/bin/asryx
+          test -f /home/ci/.local/share/asryx/asryx.env
+          test -f /home/ci/.local/share/asryx/install.manifest
+          test -f /home/ci/.local/share/asryx/models/ggml-base.en.bin
           sudo -u ci -H bash -lc "set -euo pipefail; PATH=/home/ci/.local/bin:\$PATH whisper-cli --help >/dev/null"
 
-      - name: run uninstall (smoke)
+      - name: run uninstall
         run: |
           set -eux
           chmod +x ./uninstall
@@ -101,14 +107,16 @@ jobs:
       - name: verify uninstall cleanup
         run: |
           set -eux
-          test ! -e /home/ci/.local/bin/whisper-cli
-          test ! -e /home/ci/.local/share/whisper/install.manifest
+          test ! -e /home/ci/.local/bin/asryx
+          test -e /home/ci/.local/bin/whisper-cli || true
+          test ! -e /home/ci/.local/share/asryx/asryx.env
+          test ! -e /home/ci/.local/share/asryx/install.manifest
 
       - name: upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: asr-logs-${{ matrix.id }}
+          name: asryx-logs-${{ matrix.id }}
           path: |
-            /home/ci/.cache/whisper
-            /home/ci/.local/share/whisper
+            /home/ci/.cache/asryx
+            /home/ci/.local/share/asryx

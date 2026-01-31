@@ -1,6 +1,15 @@
-# asr
+<div align="center">
 
-Turns your voice into text, offline, on Linux.
+# asryx
+
+Turns your **voice** into **text**, **offline**, on Linux.
+
+</div>
+
+
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a12d2677-7307-4042-934b-c5f67011c335" />
+
+## How it works
 
 Run it once: it records.
 Run it again: it stops, transcribes, copies to clipboard, and notifies.
