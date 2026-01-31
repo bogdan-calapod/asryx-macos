@@ -15,15 +15,46 @@ Run it again: it stops, transcribes, copies to clipboard, and notifies.
 
 No daemons. No services. No dotfile edits. No compositor edits. You get one toggle command and you wire it to whatever control surface you want.
 
+> [!NOTE]
+> Thyx as a standalone FOSS is an extension of the [OSyx](https://github.com/rccyx/osyx) ecosystem.
+
+
 ## Install
 
 Clone, then run:
 
 ```sh
-bash ./install --yes
-````
+bash ./install 
+```
+
+Stats with a **plan** showing you **exactly** what **will** **happen**, where files go, and what **will not** be **touched**.
+
+<details>
+<summary><strong>Here's how it looks like</strong></summary>
+
+<br/>
+
+<img width="958" height="1080" alt="image" src="https://github.com/user-attachments/assets/0c20a97d-e917-44ee-a17e-7380e4e4b361" />
+
+
+</details>
+
+If it looks right, confirm and proceed. If not, abort.
 
 That’s it.
+
+> [!TIP]
+> pass `--yes` if you want to bypass the plan.
+
+<details>
+<summary><strong>You should see something like this</strong></summary>
+
+<br/>
+
+<img width="963" height="1080" alt="image" src="https://github.com/user-attachments/assets/e4bbf937-687f-4ba1-bf7d-f862a1868744" />
+
+
+</details>
 
 After install, run the toggle:
 
@@ -33,7 +64,27 @@ asryx
 
 Speak. Run `asryx` again. Your text is copied to clipboard and you get a notification.
 
-## Backend 
+
+<details>
+<summary><strong>advanced install knobs</strong></summary>
+
+```sh
+./install --help
+```
+
+base.en
+
+Useful flags:
+
+`--prefix <path>` install somewhere else.
+`--no-model` skip model download.
+`--model <slug>` pick a different ggml model slug, default: e.g: `tiny.en`, `small.en`;`medium.en`, (default is `base.en`).
+`--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
+`--clean-build` rebuild from scratch.
+
+</details>
+
+## Backend
 
 This uses Whisper today (`whisper.cpp`), but the shape is a stable toggle surface + an engine behind it. The engine is swappable. Your keybind and workflow don’t change.
 
@@ -47,7 +98,7 @@ bind = ALT, W, exec, asryx
 
 Press once to start recording, press again to stop and transcribe.
 
-You can also run `asryx` from a terminal function, a script, a launcher (GNOME, etc), a bar, anything. It doesn’t care. It’s just a toggle.
+You can also run `asryx` from a terminal, a script, a launcher, a bar, anything. It doesn’t care. It’s just a toggle.
 
 ## Uninstall
 
@@ -56,6 +107,16 @@ bash ./uninstall --yes
 ```
 
 It’s manifest-driven and conservative, it removes what's installed, and won’t blindly delete random files unless you force it.
+
+<details>
+<summary><strong>See run</strong></summary>
+
+<br/>
+
+<img width="962" height="1080" alt="image" src="https://github.com/user-attachments/assets/1846a3ea-411d-49c0-b9f8-87f00199f1a8" />
+
+
+</details>
 
 ## What gets installed
 
@@ -110,24 +171,6 @@ Compatibility aliases also work:
 
 </details>
 
-<details>
-<summary><strong>advanced install knobs</strong></summary>
-
-```sh
-./install --help
-```
-
-Useful flags:
-
-`--prefix <path>` install somewhere else.
-`--no-model` skip model download.
-`--model <slug>` pick a different ggml model slug (default: `base.en`).
-`--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
-`--clean-build` rebuild from scratch.
-
-</details>
-
 ## License
 
 Apache-2.0 © [@rccyx](https://rccyx.com)
-
