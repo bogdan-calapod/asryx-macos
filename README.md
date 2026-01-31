@@ -6,99 +6,128 @@ Turns your **voice** into **text**, **offline**, on Linux.
 
 </div>
 
-
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/a12d2677-7307-4042-934b-c5f67011c335" />
 
 ## How it works
 
-Run it once: it records.
+Run it once: it records.  
 Run it again: it stops, transcribes, copies to clipboard, and notifies.
 
-This repo ships the whole surface: engine install, models, and the toggle script. You're free to hookup keybinds, scripts whatever, this provides you eveyrthing you need and more, but nothing here edits your dotfiles or compositor config.
+No daemons. No services. No dotfile edits. No compositor edits. You get one toggle command and you wire it to whatever control surface you want.
 
-## install
+## Install
 
-Clone, then run the installer.
+Clone, then run:
 
 ```sh
 bash ./install --yes
+````
+
+That’s it.
+
+After install, run the toggle:
+
+```sh
+asryx
 ```
 
-That's it, run `asr-toggle` once, you'll get a notification talk, run it again, you'll get text copied to your clipboard, you'll get a notification.
+Speak. Run `asryx` again. Your text is copied to clipboard and you get a notification.
 
-Read more below to learn how it works & how you can hook it up.
+## Backend 
 
-## Setup
-By default it installs under `$HOME/.local`.
+This uses Whisper today (`whisper.cpp`), but the shape is a stable toggle surface + an engine behind it. The engine is swappable. Your keybind and workflow don’t change.
 
-After install you should have:
+## Usage
 
-```bash
-~/.local/bin/whisper-cli        ← engine
-~/.local/bin/asr-toggle         ← toggle
-~/.local/share/asr/models/...   ← model
-~/.local/share/asr/asr.env      ← contract
-~/.local/share/asr/install.manifest
-~/.local/opt/whisper.cpp        ← build workspace
-```
-
-> [!NOTE]
-> It uses Whisper, but the backend is swappable, whisper today, somthing else tmorrow, the thing is, it will always work.
-
-## use
-
-If you are on Hyprland, bind it to a key. Example:
+If you’re on Hyprland, bind it to a key:
 
 ```ini
-bind = ALT, W, exec, asr-toggle
+bind = ALT, W, exec, asryx
 ```
 
-Now press `ALT+W` to start recording, press again to stop and transcribe.
+Press once to start recording, press again to stop and transcribe.
 
-You can also just run `asr-toggle` from a terminal, from a script, or from whatever control surface you prefer. It does not care, it only exposes a single toggle.
+You can also run `asryx` from a terminal function, a script, a launcher (GNOME, etc), a bar, anything. It doesn’t care. It’s just a toggle.
 
-## uninstall
+## Uninstall
 
 ```sh
 bash ./uninstall --yes
 ```
 
-<details>
-<summary><strong>what it uses under the hood</strong></summary>
+It’s manifest-driven and conservative, it removes what's installed, and won’t blindly delete random files unless you force it.
 
-It installs a pinned build of `whisper.cpp` for offline speech to text, installs `whisper-cli` into your prefix, and downloads a ggml model into your prefix.
+## What gets installed
 
-The toggle script is installed as `asr-toggle` and is prefix-relative, so it does not depend on your repo checkout after install.
+By default everything goes under `$HOME/.local`.
 
-</details>
+```text
+~/.local/bin/whisper-cli              engine
+~/.local/bin/asryx                    toggle command
+~/.local/share/asryx/models/*.bin     ggml model(s)
+~/.local/share/asryx/asryx.env        env contract (optional overrides)
+~/.local/share/asryx/install.manifest uninstall proof
+~/.local/opt/whisper.cpp              build workspace (pinned checkout)
+```
+
+Logs:
+
+```text
+~/.cache/asryx/install-*.log
+~/.cache/asryx/uninstall-*.log
+```
 
 <details>
 <summary><strong>requirements and behavior</strong></summary>
 
-This targets Debian/Ubuntu style systems (apt). It installs what it needs via apt.
+This targets Debian/Ubuntu-style systems (apt + dpkg). The installer pulls everything it needs via apt.
 
-Recording: prefers `pw-record` if present, otherwise uses `arecord`.
-Clipboard: uses `wl-copy` if present, otherwise `xclip`.
+Recording: prefers `pw-record` (pipewire) if present, otherwise uses `arecord`.
+Clipboard: prefers `wl-copy` if present, otherwise uses `xclip`.
 Notifications: uses `notify-send` if present.
 
-Nothing runs as a daemon. No services. No background installs after the toggle exits.
+State is local and temporary: it records into `$XDG_RUNTIME_DIR` (or `/tmp`) and cleans up after it finishes. Nothing stays running after the toggle exits.
 
 </details>
 
 <details>
 <summary><strong>configuration (optional)</strong></summary>
 
-You are not supposed to need options. But, if you insist, the toggle supports environment overrides:
+You’re not supposed to need options. But if you insist, set env vars in your shell, your keybind, or in the generated contract file:
 
-`ASR_LANG` sets the transcription language (example: `en`, `fr`, `ar`).
-`ASR_THREADS` sets thread count.
-`ASR_MODEL` overrides the model path.
-`ASR_ENGINE` overrides the engine path.
+`~/.local/share/asryx/asryx.env`
 
-Everything else is opinionated on purpose.
+Supported overrides:
+
+`ASRYX_LANG` sets transcription language (`en`, `fr`, `ar`, etc).
+`ASRYX_THREADS` sets thread count.
+`ASRYX_MODEL` overrides the model path.
+`ASRYX_ENGINE` overrides the engine path.
+
+Compatibility aliases also work:
+
+`ASR_LANG`, `ASR_THREADS`, `ASR_MODEL`, `ASR_ENGINE`.
 
 </details>
 
-## license
+<details>
+<summary><strong>advanced install knobs</strong></summary>
 
-Apache-2.0
+```sh
+./install --help
+```
+
+Useful flags:
+
+`--prefix <path>` install somewhere else.
+`--no-model` skip model download.
+`--model <slug>` pick a different ggml model slug (default: `base.en`).
+`--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
+`--clean-build` rebuild from scratch.
+
+</details>
+
+## License
+
+Apache-2.0 © [@rccyx](https://rccyx.com)
+
