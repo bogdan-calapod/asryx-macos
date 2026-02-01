@@ -1,12 +1,12 @@
 alias s:= shell
 
 @i:
-	bash ./install
+	bash ./package/install
 
 @u:
-	bash ./uninstall
+	bash ./package/uninstall
 
 
 @shell:
-	shellcheck -x install uninstall
+	shellcheck -x package/install package/uninstall
 
