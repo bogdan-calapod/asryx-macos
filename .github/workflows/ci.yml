@@ -21,8 +21,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  distros:
-    uses: ./.github/workflows/on-workflow-call-distro-smoke.yml
-
   shell:
     uses: ./.github/workflows/on-workflow-call-shell-check.yml
+
+  distros:
+    needs: shell
+    uses: ./.github/workflows/on-workflow-call-distro-smoke.yml
