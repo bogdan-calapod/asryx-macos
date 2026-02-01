@@ -39,6 +39,10 @@ jobs:
           - id: fedora-40
             image: fedora:40
 
+          # arch
+          - id: arch-latest
+            image: archlinux:latest
+
     name: smoke (${{ matrix.id }})
 
     container:
@@ -109,13 +113,9 @@ jobs:
             usermod -aG sudo ci
           fi
 
-          if getent group sudo >/dev/null 2>&1; then
-            echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
-          else
-            echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
-          fi
-
+          echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
           chmod 0440 /etc/sudoers.d/ci
+
           mkdir -p /home/ci/.cache /home/ci/.local
           chown -R ci:ci /home/ci
 
