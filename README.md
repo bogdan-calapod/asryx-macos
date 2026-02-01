@@ -68,19 +68,19 @@ Speak. Run `asryx` again. Your text is copied to clipboard and you get a notific
 <details>
 <summary><strong>advanced install knobs</strong></summary>
 
+<br/>
+
 ```sh
 ./install --help
 ```
 
-base.en
-
 Useful flags:
 
-`--prefix <path>` install somewhere else.
-`--no-model` skip model download.
-`--model <slug>` pick a different ggml model slug, default: e.g: `tiny.en`, `small.en`;`medium.en`, (default is `base.en`).
-`--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
-`--clean-build` rebuild from scratch.
+- `--prefix <path>` install somewhere else.
+- `--no-model` skip model download.
+- `--model <slug>` pick a different ggml model slug, default: e.g: `tiny.en`, `small.en`;`medium.en`, (default is `base.en`).
+- `--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
+- `--clean-build` rebuild from scratch.
 
 </details>
 
