@@ -10,12 +10,34 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+
     strategy:
       fail-fast: false
       matrix:
         include:
+          # debian
+          - id: debian-bookworm
+            image: debian:bookworm
           - id: debian-trixie
             image: debian:trixie
+          - id: debian-sid
+            image: debian:sid
+
+          # ubuntu family
+          - id: ubuntu-24.04
+            image: ubuntu:24.04
+          - id: popos-22.04
+            image: nycticoracs/pop_os:22.04
+
+          # mint
+          - id: mint-21.3
+            image: linuxmintd/mint21.3-amd64:latest
+          - id: mint-22.1
+            image: linuxmintd/mint22.1-amd64:latest
+
+          # fedora
+          - id: fedora-40
+            image: fedora:40
 
     name: smoke (${{ matrix.id }})
 
@@ -23,7 +45,6 @@ jobs:
       image: ${{ matrix.image }}
 
     env:
-      DEBIAN_FRONTEND: noninteractive
       CI: "1"
       GIT_TERMINAL_PROMPT: "0"
 
@@ -35,27 +56,65 @@ jobs:
       - name: install base tools
         run: |
           set -eux
-          if ! command -v apt-get >/dev/null; then
-            echo "apt-get not found; unsupported image"
+
+          if command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates \
+              curl \
+              git \
+              sudo \
+              xz-utils \
+              tar
+            rm -rf /var/lib/apt/lists/*
+          elif command -v dnf >/dev/null 2>&1; then
+            dnf -y install \
+              ca-certificates \
+              curl \
+              git \
+              sudo \
+              xz \
+              tar
+            dnf -y clean all || true
+          elif command -v pacman >/dev/null 2>&1; then
+            pacman -Syu --noconfirm --needed \
+              ca-certificates \
+              curl \
+              git \
+              sudo \
+              xz \
+              tar \
+              shadow
+            pacman -Scc --noconfirm || true
+          else
+            echo "no supported package manager found"
             exit 1
           fi
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl \
-            git \
-            sudo \
-            xz-utils \
-            tar
-          rm -rf /var/lib/apt/lists/*
 
       - name: create ci user (passwordless sudo)
         run: |
           set -eux
-          useradd -m -s /bin/bash ci
-          getent group sudo >/dev/null || groupadd sudo
-          usermod -aG sudo ci
-          echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
+
+          if ! id ci >/dev/null 2>&1; then
+            useradd -m -s /bin/bash ci
+          fi
+
+          if getent group sudo >/dev/null 2>&1; then
+            usermod -aG sudo ci
+          elif getent group wheel >/dev/null 2>&1; then
+            usermod -aG wheel ci
+          else
+            groupadd sudo
+            usermod -aG sudo ci
+          fi
+
+          if getent group sudo >/dev/null 2>&1; then
+            echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
+          else
+            echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
+          fi
+
           chmod 0440 /etc/sudoers.d/ci
           mkdir -p /home/ci/.cache /home/ci/.local
           chown -R ci:ci /home/ci
