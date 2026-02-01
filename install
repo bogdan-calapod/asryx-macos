@@ -24,22 +24,6 @@ PREFIX="${PREFIX_DEFAULT}"
 FORCE=0
 CLEAN_BUILD=0
 
-APT_PKGS=(
-  ca-certificates
-  curl
-  git
-  build-essential
-  cmake
-  pkg-config
-  ninja-build
-  zsh
-  alsa-utils
-  libnotify-bin
-  wl-clipboard
-  xclip
-  pulseaudio-utils
-)
-
 if [ -t 1 ]; then
   red='\033[0;31m'
   green='\033[0;32m'
@@ -64,6 +48,73 @@ hr() { echo -e "${cyan}${dim}---------------------------------------------------
 
 LOG_FILE=""
 
+PM=""
+PM_UPDATED=0
+PM_PREPARED=0
+
+APT_BUILD_PKGS=(
+  ca-certificates
+  curl
+  git
+  build-essential
+  cmake
+  pkg-config
+  ninja-build
+)
+
+APT_RUNTIME_PKGS=(
+  zsh
+  alsa-utils
+  libnotify-bin
+  wl-clipboard
+  xclip
+  pulseaudio-utils
+)
+
+DNF_BUILD_PKGS=(
+  ca-certificates
+  curl
+  git
+  gcc
+  gcc-c++
+  make
+  cmake
+  pkgconf-pkg-config
+  ninja-build
+)
+
+DNF_RUNTIME_PKGS=(
+  zsh
+  alsa-utils
+  libnotify
+  wl-clipboard
+  xclip
+  pulseaudio-utils
+)
+
+PAC_BUILD_PKGS=(
+  ca-certificates
+  curl
+  git
+  gcc
+  make
+  cmake
+  pkgconf
+  ninja
+)
+
+PAC_RUNTIME_PKGS=(
+  zsh
+  alsa-utils
+  libnotify
+  wl-clipboard
+  xclip
+  pulseaudio
+)
+
+DEPS_BUILD=()
+DEPS_RUNTIME=()
+
 usage() {
   cat <<'EOF'
 usage:
@@ -78,7 +129,7 @@ defaults:
   (models are installed unless --no-model)
 
 behavior:
-  - installs deps via apt (zsh, recorder tools, clipboard tools, notify-send, build deps)
+  - installs deps via system package manager (apt/dnf/pacman)
   - clones/updates whisper.cpp into <prefix>/opt/whisper.cpp at pinned sha
   - builds Release engine
   - installs <prefix>/bin/whisper-cli (and whisper-stream if built)
@@ -133,9 +184,134 @@ on_err() {
   exit "${code}"
 }
 
-require_debianish() {
-  command -v apt-get >/dev/null 2>&1 || die "apt-get not found"
-  command -v dpkg >/dev/null 2>&1 || die "dpkg not found"
+detect_pm() {
+  if command -v apt-get >/dev/null 2>&1; then
+    PM="apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    PM="dnf"
+  elif command -v pacman >/dev/null 2>&1; then
+    PM="pacman"
+  else
+    die "no supported package manager found (need apt-get, dnf, or pacman)"
+  fi
+}
+
+set_deps_for_pm() {
+  case "${PM}" in
+    apt)
+      DEPS_BUILD=("${APT_BUILD_PKGS[@]}")
+      DEPS_RUNTIME=("${APT_RUNTIME_PKGS[@]}")
+      ;;
+    dnf)
+      DEPS_BUILD=("${DNF_BUILD_PKGS[@]}")
+      DEPS_RUNTIME=("${DNF_RUNTIME_PKGS[@]}")
+      ;;
+    pacman)
+      DEPS_BUILD=("${PAC_BUILD_PKGS[@]}")
+      DEPS_RUNTIME=("${PAC_RUNTIME_PKGS[@]}")
+      ;;
+    *)
+      die "unsupported package manager: ${PM}"
+      ;;
+  esac
+}
+
+pm_prepare_once() {
+  [ "${PM_PREPARED}" -eq 0 ] || return 0
+  PM_PREPARED=1
+
+  case "${PM}" in
+    apt)
+      command -v dpkg >/dev/null 2>&1 || die "dpkg not found (apt detected but dpkg missing)"
+      ;;
+    dnf)
+      command -v rpm >/dev/null 2>&1 || die "rpm not found (dnf detected but rpm missing)"
+      ;;
+    pacman)
+      command -v pacman-key >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
+pm_update_once() {
+  [ "${PM_UPDATED}" -eq 0 ] || return 0
+  PM_UPDATED=1
+
+  case "${PM}" in
+    apt)
+      $(need_sudo) apt-get update
+      ;;
+    dnf)
+      $(need_sudo) dnf -y makecache || true
+      ;;
+    pacman)
+      if command -v pacman-key >/dev/null 2>&1; then
+        $(need_sudo) pacman-key --init || true
+        $(need_sudo) pacman-key --populate archlinux || true
+      fi
+      $(need_sudo) pacman -Sy --noconfirm || true
+      ;;
+  esac
+}
+
+pkg_installed() {
+  case "${PM}" in
+    apt) dpkg -s "$1" >/dev/null 2>&1 ;;
+    dnf) rpm -q "$1" >/dev/null 2>&1 ;;
+    pacman) pacman -Qi "$1" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+pm_install_many() {
+  pm_prepare_once
+  pm_update_once
+
+  case "${PM}" in
+    apt)
+      $(need_sudo) apt-get install -y --no-install-recommends "$@"
+      ;;
+    dnf)
+      $(need_sudo) dnf -y install --setopt=install_weak_deps=False "$@"
+      ;;
+    pacman)
+      $(need_sudo) pacman -S --noconfirm --needed "$@"
+      ;;
+    *)
+      die "unsupported package manager: ${PM}"
+      ;;
+  esac
+}
+
+install_required_missing() {
+  local missing=() p
+  for p in "$@"; do
+    pkg_installed "$p" || missing+=("$p")
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    ok "deps already present"
+    return 0
+  fi
+  step "deps (required)"
+  info "installing: ${missing[*]}"
+  pm_install_many "${missing[@]}"
+  ok "deps installed"
+}
+
+install_optional_missing() {
+  local p
+  step "deps (optional)"
+  for p in "$@"; do
+    if pkg_installed "$p"; then
+      continue
+    fi
+    info "installing: ${p}"
+    if pm_install_many "$p"; then
+      ok "installed: ${p}"
+    else
+      warn "skipping optional dep (not available): ${p}"
+    fi
+  done
 }
 
 confirm_plan() {
@@ -144,7 +320,7 @@ confirm_plan() {
     return 0
   fi
   echo
-  info "this will install packages via apt and write under: ${PREFIX}"
+  info "this will install packages via ${PM} and write under: ${PREFIX}"
   info "type ${bold}y${nc} to proceed"
   printf "%bproceed?%b " "${cyan}" "${nc}"
   local ans
@@ -160,29 +336,14 @@ sudo_warmup() {
     ok "root allowed (--force)"
     return 0
   fi
-  info "sudo is required for apt"
+  command -v sudo >/dev/null 2>&1 || die "sudo not found (install sudo or run with root + --force)"
+  info "sudo is required for system deps"
   if sudo -n true >/dev/null 2>&1; then
     ok "sudo: non-interactive ok"
     return 0
   fi
   sudo -v || die "sudo auth failed"
   ok "sudo ok"
-}
-
-pkg_installed() { dpkg -s "$1" >/dev/null 2>&1; }
-
-apt_install_missing() {
-  local pkgs=() p
-  for p in "$@"; do pkg_installed "$p" || pkgs+=("$p"); done
-  if [ "${#pkgs[@]}" -eq 0 ]; then
-    ok "deps already present"
-    return 0
-  fi
-  step "deps"
-  info "installing: ${pkgs[*]}"
-  $(need_sudo) apt-get update -y
-  $(need_sudo) apt-get install -y --no-install-recommends "${pkgs[@]}"
-  ok "deps installed"
 }
 
 sha256() { sha256sum "$1" | awk '{print $1}'; }
@@ -223,11 +384,12 @@ print_plan() {
   echo "models dir: ${MODELS_DIR}"
   echo "env:        ${ENV_FILE}"
   echo "manifest:   ${MANIFEST}"
+  echo "pm:         ${PM}"
   echo "model:      $([ "${WITH_MODEL}" -eq 1 ] && echo "${MODEL_SLUG}" || echo "none")"
   echo "clean:      $([ "${CLEAN_BUILD}" -eq 1 ] && echo "yes" || echo "no")"
   hr
   echo "will do:"
-  echo "  - install deps (apt)"
+  echo "  - install deps (${PM})"
   echo "  - clone/update engine repo and hard-checkout pinned commit"
   echo "  - build Release engine"
   echo "  - install engine binaries into <prefix>/bin"
@@ -468,12 +630,19 @@ main() {
   trap on_err ERR
   parse_args "$@"
   log_setup
-  require_debianish
+
+  detect_pm
+  set_deps_for_pm
+  pm_prepare_once
+
   set_paths
   print_plan
   confirm_plan
   sudo_warmup
-  apt_install_missing "${APT_PKGS[@]}"
+
+  install_required_missing "${DEPS_BUILD[@]}"
+  install_optional_missing "${DEPS_RUNTIME[@]}"
+
   clone_or_update
   build_release
   install_binaries_atomic

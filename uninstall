@@ -59,7 +59,7 @@ behavior:
   - removes recorded model (auto) unless keep-models
   - removes manifest and prunes empty share dirs
   - optionally removes workspace <prefix>/opt/whisper.cpp (auto-safe)
-  - does not touch apt packages
+  - does not touch system packages
 EOF
 }
 
@@ -248,6 +248,7 @@ prune_empty_dirs() {
 
 workspace_looks_like_whisper_cpp() {
   [ -d "${WORKSPACE}/.git" ] || return 1
+  command -v git >/dev/null 2>&1 || return 1
   local url
   url="$(git -C "${WORKSPACE}" config --get remote.origin.url 2>/dev/null || true)"
   case "${url}" in
