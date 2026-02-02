@@ -24,30 +24,52 @@ PREFIX="${PREFIX_DEFAULT}"
 FORCE=0
 CLEAN_BUILD=0
 
+# --- colors / UI --------------------------------------------------------------
 if [ -t 1 ]; then
-  red='\033[0;31m'
-  green='\033[0;32m'
-  yellow='\033[0;33m'
-  blue='\033[0;34m'
-  magenta='\033[0;35m'
-  cyan='\033[0;36m'
-  bold='\033[1m'
-  dim='\033[2m'
-  nc='\033[0m'
+  red=$'\033[0;31m'
+  green=$'\033[0;32m'
+  yellow=$'\033[0;33m'
+  blue=$'\033[0;34m'
+  magenta=$'\033[0;35m'
+  cyan=$'\033[0;36m'
+  bold=$'\033[1m'
+  dim=$'\033[2m'
+  nc=$'\033[0m'
 else
   red=''; green=''; yellow=''; blue=''; magenta=''; cyan=''; bold=''; dim=''; nc=''
 fi
 
-need_sudo() { if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo sudo; fi; }
-die() { echo -e "${red}${bold}error:${nc} $*" >&2; exit 1; }
-ok() { echo -e "${green}${bold}✔${nc} $*"; }
-warn() { echo -e "${yellow}${bold}⚠${nc} $*"; }
-info() { echo -e "${blue}${bold}i${nc} $*"; }
-step() { echo -e "\n${magenta}${bold}==>${nc} $*"; }
-hr() { echo -e "${cyan}${dim}------------------------------------------------------------${nc}"; }
-
 LOG_FILE=""
 
+need_sudo() { if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo sudo; fi; }
+
+_emit() {
+  # write to terminal and append to log (if configured)
+  # shellcheck disable=SC2059
+  printf "%b\n" "$*"
+  if [ -n "${LOG_FILE}" ]; then
+    # shellcheck disable=SC2059
+    printf "%b\n" "$*" >>"${LOG_FILE}"
+  fi
+}
+
+die()  { _emit "${red}${bold}error:${nc} $*"; exit 1; }
+ok()   { _emit "${green}${bold}✔${nc} $*"; }
+warn() { _emit "${yellow}${bold}⚠${nc} $*"; }
+info() { _emit "${blue}${bold}i${nc} $*"; }
+step() { _emit ""; _emit "${magenta}${bold}==>${nc} $*"; }
+hr()   { _emit "${cyan}${dim}------------------------------------------------------------${nc}"; }
+
+ts_now() { date +%s; }
+dur() {
+  local a="$1" b="$2" d
+  d=$((b - a))
+  printf "%ss" "${d}"
+}
+
+has_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+# --- deps (build only) --------------------------------------------------------
 PM=""
 PM_UPDATED=0
 PM_PREPARED=0
@@ -62,15 +84,6 @@ APT_BUILD_PKGS=(
   ninja-build
 )
 
-APT_RUNTIME_PKGS=(
-  zsh
-  alsa-utils
-  libnotify-bin
-  wl-clipboard
-  xclip
-  pulseaudio-utils
-)
-
 DNF_BUILD_PKGS=(
   ca-certificates
   curl
@@ -81,15 +94,6 @@ DNF_BUILD_PKGS=(
   cmake
   pkgconf-pkg-config
   ninja-build
-)
-
-DNF_RUNTIME_PKGS=(
-  zsh
-  alsa-utils
-  libnotify
-  wl-clipboard
-  xclip
-  pulseaudio-utils
 )
 
 PAC_BUILD_PKGS=(
@@ -103,17 +107,14 @@ PAC_BUILD_PKGS=(
   ninja
 )
 
-PAC_RUNTIME_PKGS=(
-  zsh
-  alsa-utils
-  libnotify
-  wl-clipboard
-  xclip
-  pulseaudio
-)
-
 DEPS_BUILD=()
-DEPS_RUNTIME=()
+
+# runtime capability providers (per PM)
+PKG_AUDIO_PW=""    # provides pw-record
+PKG_AUDIO_ALSA=""  # provides arecord
+PKG_CLIP_WL=""     # provides wl-copy
+PKG_CLIP_X11=""    # provides xclip
+PKG_NOTIFY=""      # provides notify-send
 
 usage() {
   cat <<'EOF'
@@ -127,13 +128,19 @@ defaults:
   --sha      pinned commit for reproducibility
   --model    base.en
   (models are installed unless --no-model)
+w
+runtime deps:
+  - audio recorder: pw-record OR arecord
+  - clipboard: wl-copy (Wayland) OR xclip (X11)
+  - notifications: notify-send
 
-behavior:
-  - installs deps via system package manager (apt/dnf/pacman)
+installer behavior:
+  - installs build deps via system package manager (apt/dnf/pacman)
+  - ensures runtime contract tools exist (installs minimal providers if missing)
   - clones/updates whisper.cpp into <prefix>/opt/whisper.cpp at pinned sha
   - builds Release engine
   - installs <prefix>/bin/whisper-cli (and whisper-stream if built)
-  - installs ggml model into <prefix>/share/asryx/models
+  - installs ggml model into <prefix>/share/asryx/models (unless --no-model)
   - installs toggle into <prefix>/bin/asryx
   - writes env contract to <prefix>/share/asryx/asryx.env
   - writes uninstall manifest to <prefix>/share/asryx/install.manifest
@@ -168,7 +175,7 @@ log_setup() {
   log_dir="${cache_dir}/${APP_ID}"
   mkdir -p "${log_dir}"
   LOG_FILE="${log_dir}/install-${timestamp}.log"
-  exec > >(tee -a "${LOG_FILE}") 2>&1
+  : >"${LOG_FILE}"
   info "log: ${LOG_FILE}"
 }
 
@@ -176,7 +183,7 @@ on_err() {
   local code="$?"
   local line="${BASH_LINENO[0]:-?}"
   local cmd="${BASH_COMMAND:-?}"
-  echo
+  _emit ""
   warn "failed (exit ${code})"
   warn "at line: ${line}"
   warn "cmd: ${cmd}"
@@ -185,30 +192,43 @@ on_err() {
 }
 
 detect_pm() {
-  if command -v apt-get >/dev/null 2>&1; then
+  if has_cmd apt-get; then
     PM="apt"
-  elif command -v dnf >/dev/null 2>&1; then
+  elif has_cmd dnf; then
     PM="dnf"
-  elif command -v pacman >/dev/null 2>&1; then
+  elif has_cmd pacman; then
     PM="pacman"
   else
     die "no supported package manager found (need apt-get, dnf, or pacman)"
   fi
+  ok "pm: ${PM}"
 }
 
 set_deps_for_pm() {
   case "${PM}" in
     apt)
       DEPS_BUILD=("${APT_BUILD_PKGS[@]}")
-      DEPS_RUNTIME=("${APT_RUNTIME_PKGS[@]}")
+      PKG_AUDIO_PW="pipewire"
+      PKG_AUDIO_ALSA="alsa-utils"
+      PKG_CLIP_WL="wl-clipboard"
+      PKG_CLIP_X11="xclip"
+      PKG_NOTIFY="libnotify-bin"
       ;;
     dnf)
       DEPS_BUILD=("${DNF_BUILD_PKGS[@]}")
-      DEPS_RUNTIME=("${DNF_RUNTIME_PKGS[@]}")
+      PKG_AUDIO_PW="pipewire-utils"
+      PKG_AUDIO_ALSA="alsa-utils"
+      PKG_CLIP_WL="wl-clipboard"
+      PKG_CLIP_X11="xclip"
+      PKG_NOTIFY="libnotify"
       ;;
     pacman)
       DEPS_BUILD=("${PAC_BUILD_PKGS[@]}")
-      DEPS_RUNTIME=("${PAC_RUNTIME_PKGS[@]}")
+      PKG_AUDIO_PW="pipewire"
+      PKG_AUDIO_ALSA="alsa-utils"
+      PKG_CLIP_WL="wl-clipboard"
+      PKG_CLIP_X11="xclip"
+      PKG_NOTIFY="libnotify"
       ;;
     *)
       die "unsupported package manager: ${PM}"
@@ -222,13 +242,14 @@ pm_prepare_once() {
 
   case "${PM}" in
     apt)
-      command -v dpkg >/dev/null 2>&1 || die "dpkg not found (apt detected but dpkg missing)"
+      has_cmd dpkg || die "dpkg not found (apt detected but dpkg missing)"
       ;;
     dnf)
-      command -v rpm >/dev/null 2>&1 || die "rpm not found (dnf detected but rpm missing)"
+      has_cmd rpm || die "rpm not found (dnf detected but rpm missing)"
       ;;
     pacman)
-      command -v pacman-key >/dev/null 2>&1 || true
+      # optional; pacman may be present without key tool
+      true
       ;;
   esac
 }
@@ -237,19 +258,27 @@ pm_update_once() {
   [ "${PM_UPDATED}" -eq 0 ] || return 0
   PM_UPDATED=1
 
+  step "pm index"
   case "${PM}" in
     apt)
-      $(need_sudo) apt-get update
+      info "apt-get update"
+      $(need_sudo) apt-get update >>"${LOG_FILE}" 2>&1
+      ok "apt index updated"
       ;;
     dnf)
-      $(need_sudo) dnf -y makecache || true
+      info "dnf makecache"
+      # don't die on makecache noise, real installs will fail if truly broken
+      $(need_sudo) dnf -y makecache >>"${LOG_FILE}" 2>&1 || true
+      ok "dnf cache refreshed"
       ;;
     pacman)
-      if command -v pacman-key >/dev/null 2>&1; then
-        $(need_sudo) pacman-key --init || true
-        $(need_sudo) pacman-key --populate archlinux || true
+      info "pacman -Sy"
+      if has_cmd pacman-key; then
+        $(need_sudo) pacman-key --init >>"${LOG_FILE}" 2>&1 || true
+        $(need_sudo) pacman-key --populate archlinux >>"${LOG_FILE}" 2>&1 || true
       fi
-      $(need_sudo) pacman -Sy --noconfirm || true
+      $(need_sudo) pacman -Sy --noconfirm >>"${LOG_FILE}" 2>&1 || true
+      ok "pacman sync done"
       ;;
   esac
 }
@@ -267,51 +296,36 @@ pm_install_many() {
   pm_prepare_once
   pm_update_once
 
+  step "pm install"
+  info "installing: $*"
   case "${PM}" in
     apt)
-      $(need_sudo) apt-get install -y --no-install-recommends "$@"
+      $(need_sudo) apt-get install -y --no-install-recommends "$@" >>"${LOG_FILE}" 2>&1
       ;;
     dnf)
-      $(need_sudo) dnf -y install --setopt=install_weak_deps=False "$@"
+      $(need_sudo) dnf -y install --setopt=install_weak_deps=False "$@" >>"${LOG_FILE}" 2>&1
       ;;
     pacman)
-      $(need_sudo) pacman -S --noconfirm --needed "$@"
+      $(need_sudo) pacman -S --noconfirm --needed "$@" >>"${LOG_FILE}" 2>&1
       ;;
     *)
       die "unsupported package manager: ${PM}"
       ;;
   esac
+  ok "installed: $*"
 }
 
-install_required_missing() {
+install_missing_pkgs() {
   local missing=() p
   for p in "$@"; do
+    [ -n "${p}" ] || continue
     pkg_installed "$p" || missing+=("$p")
   done
   if [ "${#missing[@]}" -eq 0 ]; then
     ok "deps already present"
     return 0
   fi
-  step "deps (required)"
-  info "installing: ${missing[*]}"
   pm_install_many "${missing[@]}"
-  ok "deps installed"
-}
-
-install_optional_missing() {
-  local p
-  step "deps (optional)"
-  for p in "$@"; do
-    if pkg_installed "$p"; then
-      continue
-    fi
-    info "installing: ${p}"
-    if pm_install_many "$p"; then
-      ok "installed: ${p}"
-    else
-      warn "skipping optional dep (not available): ${p}"
-    fi
-  done
 }
 
 confirm_plan() {
@@ -319,7 +333,7 @@ confirm_plan() {
     ok "auto mode: skipping confirmation (--yes/-y)"
     return 0
   fi
-  echo
+  _emit ""
   info "this will install packages via ${PM} and write under: ${PREFIX}"
   info "type ${bold}y${nc} to proceed"
   printf "%bproceed?%b " "${cyan}" "${nc}"
@@ -336,13 +350,13 @@ sudo_warmup() {
     ok "root allowed (--force)"
     return 0
   fi
-  command -v sudo >/dev/null 2>&1 || die "sudo not found (install sudo or run with root + --force)"
+  has_cmd sudo || die "sudo not found (install sudo or run as root + --force)"
   info "sudo is required for system deps"
   if sudo -n true >/dev/null 2>&1; then
     ok "sudo: non-interactive ok"
     return 0
   fi
-  sudo -v || die "sudo auth failed"
+  sudo -v >/dev/null 2>&1 || die "sudo auth failed"
   ok "sudo ok"
 }
 
@@ -369,58 +383,209 @@ set_paths() {
   MANIFEST="${SHARE_DIR}/install.manifest"
 }
 
+session_type() {
+  # best-effort detection for clipboard choice
+  if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    echo "wayland"
+  elif [ "${XDG_SESSION_TYPE:-}" = "x11" ] || [ -n "${DISPLAY:-}" ]; then
+    echo "x11"
+  else
+    echo "unknown"
+  fi
+}
+
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}asryx installer${nc}"
-  echo
-  echo "prefix:     ${PREFIX}"
-  echo "repo:       ${ENGINE_REPO_URL}"
-  echo "commit:     ${SHA}"
-  echo "workspace:  ${ROOT}"
-  echo "build dir:  ${BUILD}"
-  echo "bin dir:    ${BIN_DIR}"
-  echo "share dir:  ${SHARE_DIR}"
-  echo "models dir: ${MODELS_DIR}"
-  echo "env:        ${ENV_FILE}"
-  echo "manifest:   ${MANIFEST}"
-  echo "pm:         ${PM}"
-  echo "model:      $([ "${WITH_MODEL}" -eq 1 ] && echo "${MODEL_SLUG}" || echo "none")"
-  echo "clean:      $([ "${CLEAN_BUILD}" -eq 1 ] && echo "yes" || echo "no")"
+  _emit "${bold}asryx installer${nc}"
+  _emit ""
+  _emit "prefix:     ${PREFIX}"
+  _emit "repo:       ${ENGINE_REPO_URL}"
+  _emit "commit:     ${SHA}"
+  _emit "workspace:  ${ROOT}"
+  _emit "build dir:  ${BUILD}"
+  _emit "bin dir:    ${BIN_DIR}"
+  _emit "share dir:  ${SHARE_DIR}"
+  _emit "models dir: ${MODELS_DIR}"
+  _emit "env:        ${ENV_FILE}"
+  _emit "manifest:   ${MANIFEST}"
+  _emit "pm:         ${PM}"
+  _emit "model:      $([ "${WITH_MODEL}" -eq 1 ] && echo "${MODEL_SLUG}" || echo "none")"
+  _emit "clean:      $([ "${CLEAN_BUILD}" -eq 1 ] && echo "yes" || echo "no")"
+  _emit "session:    $(session_type)"
   hr
-  echo "will do:"
-  echo "  - install deps (${PM})"
-  echo "  - clone/update engine repo and hard-checkout pinned commit"
-  echo "  - build Release engine"
-  echo "  - install engine binaries into <prefix>/bin"
-  echo "  - install toggle into <prefix>/bin/asryx"
-  echo "  - install model into <prefix>/share/asryx/models (unless --no-model)"
-  echo "  - write <prefix>/share/asryx/asryx.env contract"
-  echo "  - write manifest for safe uninstall"
-  echo
-  echo "will NOT do:"
-  echo "  - modify shell rc files"
-  echo "  - edit Hyprland or any compositor config"
-  echo "  - run daemons or background services"
+  _emit "will do:"
+  _emit "  - install build deps (${PM})"
+  _emit "  - ensure runtime contract tools exist (recorder + clipboard + notify)"
+  _emit "  - clone/update engine repo and hard-checkout pinned commit"
+  _emit "  - build Release engine"
+  _emit "  - install engine binaries into <prefix>/bin"
+  _emit "  - install toggle into <prefix>/bin/asryx"
+  _emit "  - install model into <prefix>/share/asryx/models (unless --no-model)"
+  _emit "  - write <prefix>/share/asryx/asryx.env contract"
+  _emit "  - write manifest for safe uninstall"
+  _emit ""
   hr
+}
+
+ensure_runtime_contract() {
+  step "runtime contract"
+
+  # --- notify-send (mandatory) ---
+  if has_cmd notify-send; then
+    ok "notify: notify-send (present)"
+  else
+    info "notify: missing -> installing (${PKG_NOTIFY})"
+    if pm_install_many "${PKG_NOTIFY}"; then
+      has_cmd notify-send || die "notify-send still missing after install (${PKG_NOTIFY})"
+      ok "notify: notify-send (installed)"
+    else
+      die "failed to install notify provider (${PKG_NOTIFY})"
+    fi
+  fi
+
+  # --- audio recorder: pw-record OR arecord ---
+  if has_cmd pw-record; then
+    ok "audio: pw-record (present)"
+  elif has_cmd arecord; then
+    ok "audio: arecord (present)"
+  else
+    info "audio: no recorder found -> installing preferred (${PKG_AUDIO_PW})"
+    if pm_install_many "${PKG_AUDIO_PW}"; then
+      if has_cmd pw-record; then
+        ok "audio: pw-record (installed)"
+      fi
+    else
+      warn "audio: preferred install failed (${PKG_AUDIO_PW}), trying fallback (${PKG_AUDIO_ALSA})"
+    fi
+
+    if ! has_cmd pw-record && ! has_cmd arecord; then
+      if pm_install_many "${PKG_AUDIO_ALSA}"; then
+        has_cmd arecord || die "arecord still missing after install (${PKG_AUDIO_ALSA})"
+        ok "audio: arecord (installed)"
+      else
+        die "failed to install any recorder (tried ${PKG_AUDIO_PW}, ${PKG_AUDIO_ALSA})"
+      fi
+    fi
+  fi
+
+  # --- clipboard: wl-copy (Wayland) OR xclip (X11) ---
+  local st
+  st="$(session_type)"
+
+  if [ "${st}" = "wayland" ]; then
+    if has_cmd wl-copy; then
+      ok "clipboard: wl-copy (present)"
+    else
+      info "clipboard: missing wl-copy -> installing (${PKG_CLIP_WL})"
+      if pm_install_many "${PKG_CLIP_WL}"; then
+        has_cmd wl-copy || die "wl-copy still missing after install (${PKG_CLIP_WL})"
+        ok "clipboard: wl-copy (installed)"
+      else
+        die "failed to install wl-clipboard (${PKG_CLIP_WL})"
+      fi
+    fi
+  elif [ "${st}" = "x11" ]; then
+    if has_cmd xclip; then
+      ok "clipboard: xclip (present)"
+    else
+      info "clipboard: missing xclip -> installing (${PKG_CLIP_X11})"
+      if pm_install_many "${PKG_CLIP_X11}"; then
+        has_cmd xclip || die "xclip still missing after install (${PKG_CLIP_X11})"
+        ok "clipboard: xclip (installed)"
+      else
+        die "failed to install xclip (${PKG_CLIP_X11})"
+      fi
+    fi
+  else
+    # unknown session; to preserve asryx guarantees, install both providers (minimal + deterministic).
+    local ok_any=0
+    if has_cmd wl-copy || has_cmd xclip; then
+      ok_any=1
+      ok "clipboard: provider present ($(has_cmd wl-copy && echo wl-copy || echo xclip))"
+    fi
+    if [ "${ok_any}" -eq 0 ]; then
+      warn "clipboard: session unknown -> installing both providers for safety"
+      if pm_install_many "${PKG_CLIP_WL}" "${PKG_CLIP_X11}"; then
+        (has_cmd wl-copy || has_cmd xclip) || die "no clipboard tool after install"
+        ok "clipboard: provider installed"
+      else
+        # try individually to be resilient
+        warn "clipboard: bulk install failed; trying individually"
+        pm_install_many "${PKG_CLIP_WL}" || true
+        pm_install_many "${PKG_CLIP_X11}" || true
+        (has_cmd wl-copy || has_cmd xclip) || die "no clipboard tool after attempts"
+        ok "clipboard: provider installed"
+      fi
+    fi
+  fi
+
+  hr
+  _emit "${bold}runtime status${nc}"
+
+  local notify_status=""
+  local audio_status=""
+  local clipboard_status=""
+
+  if has_cmd notify-send; then
+    notify_status="notify-send"
+  else
+    notify_status="missing"
+  fi
+
+  if has_cmd pw-record; then
+    audio_status="pw-record"
+  elif has_cmd arecord; then
+    audio_status="arecord"
+  else
+    audio_status="missing"
+  fi
+
+  if has_cmd wl-copy; then
+    clipboard_status="wl-copy"
+  elif has_cmd xclip; then
+    clipboard_status="xclip"
+  else
+    clipboard_status="missing"
+  fi
+
+  _emit "  notify:    ${notify_status}"
+  _emit "  audio:     ${audio_status}"
+  _emit "  clipboard: ${clipboard_status}"
+  hr
+
+  # hard guarantee
+  has_cmd notify-send || die "runtime contract failed: notify-send missing"
+  (has_cmd pw-record || has_cmd arecord) || die "runtime contract failed: no recorder (pw-record/arecord)"
+  (has_cmd wl-copy || has_cmd xclip) || die "runtime contract failed: no clipboard (wl-copy/xclip)"
+  ok "runtime contract satisfied"
 }
 
 clone_or_update() {
   step "source"
   mkdir -p "${PREFIX}/opt"
+
   if [ -d "${ROOT}/.git" ]; then
     ok "repo exists: ${ROOT}"
-    git -C "${ROOT}" fetch --all --tags --prune
+    git -C "${ROOT}" fetch --all --tags --prune >>"${LOG_FILE}" 2>&1
   else
     ok "cloning: ${ENGINE_REPO_URL} -> ${ROOT}"
-    git clone "${ENGINE_REPO_URL}" "${ROOT}"
+    git clone "${ENGINE_REPO_URL}" "${ROOT}" >>"${LOG_FILE}" 2>&1
   fi
 
-  git -C "${ROOT}" cat-file -e "${SHA}^{commit}" 2>/dev/null || die "commit not found: ${SHA}"
-  git -C "${ROOT}" checkout -f "${SHA}"
-  git -C "${ROOT}" reset --hard "${SHA}"
-  git -C "${ROOT}" submodule update --init --recursive
+  git -C "${ROOT}" cat-file -e "${SHA}^{commit}" >>"${LOG_FILE}" 2>&1 || die "commit not found: ${SHA}"
+  git -C "${ROOT}" checkout -f "${SHA}" >>"${LOG_FILE}" 2>&1
+  git -C "${ROOT}" reset --hard "${SHA}" >>"${LOG_FILE}" 2>&1
+  git -C "${ROOT}" submodule update --init --recursive >>"${LOG_FILE}" 2>&1 || true
   ok "source pinned: ${SHA}"
+}
+
+nproc_fallback() {
+  if has_cmd nproc; then
+    nproc
+  else
+    echo 4
+  fi
 }
 
 build_release() {
@@ -430,11 +595,19 @@ build_release() {
     rm -rf "${BUILD}"
   fi
   mkdir -p "${BUILD}"
-  cmake -S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release >/dev/null
-  cmake --build "${BUILD}" --parallel "$(nproc)" >/dev/null
+
+  local t0 t1
+  t0="$(ts_now)"
+  info "configuring (cmake)"
+  cmake -S "${ROOT}" -B "${BUILD}" -DCMAKE_BUILD_TYPE=Release >>"${LOG_FILE}" 2>&1
+  info "building (n=$(nproc_fallback))"
+  cmake --build "${BUILD}" --parallel "$(nproc_fallback)" >>"${LOG_FILE}" 2>&1
+  t1="$(ts_now)"
+
   local cli="${BUILD}/bin/whisper-cli"
   [ -x "${cli}" ] || die "build did not produce whisper-cli at ${cli}"
-  ok "built whisper-cli"
+  ok "built whisper-cli ($(dur "${t0}" "${t1}"))"
+
   if [ -x "${BUILD}/bin/whisper-stream" ]; then
     ok "built whisper-stream"
   else
@@ -457,11 +630,11 @@ install_binaries_atomic() {
   install -m 0755 "${cli_src}" "${stage}/whisper-cli"
 
   if [ -f "${cli_dst}" ] || [ -L "${cli_dst}" ]; then
-    mv -f "${cli_dst}" "${cli_bak}" || true
+    mv -f "${cli_dst}" "${cli_bak}" >>"${LOG_FILE}" 2>&1 || true
   fi
   mv -f "${stage}/whisper-cli" "${cli_dst}"
-  rm -rf "${stage}" >/dev/null 2>&1 || true
-  rm -f "${cli_bak}" >/dev/null 2>&1 || true
+  rm -rf "${stage}" >>"${LOG_FILE}" 2>&1 || true
+  rm -f "${cli_bak}" >>"${LOG_FILE}" 2>&1 || true
   ok "installed: ${cli_dst}"
 
   if [ -x "${BUILD}/bin/whisper-stream" ]; then
@@ -472,11 +645,11 @@ install_binaries_atomic() {
     mkdir -p "${stage2}"
     install -m 0755 "${stream_src}" "${stage2}/whisper-stream"
     if [ -f "${stream_dst}" ] || [ -L "${stream_dst}" ]; then
-      mv -f "${stream_dst}" "${stream_bak}" || true
+      mv -f "${stream_dst}" "${stream_bak}" >>"${LOG_FILE}" 2>&1 || true
     fi
     mv -f "${stage2}/whisper-stream" "${stream_dst}"
-    rm -rf "${stage2}" >/dev/null 2>&1 || true
-    rm -f "${stream_bak}" >/dev/null 2>&1 || true
+    rm -rf "${stage2}" >>"${LOG_FILE}" 2>&1 || true
+    rm -f "${stream_bak}" >>"${LOG_FILE}" 2>&1 || true
     ok "installed: ${stream_dst}"
   fi
 }
@@ -497,7 +670,7 @@ download_model_if_enabled() {
   [ -f "${dl}" ] || die "missing model downloader: ${dl}"
 
   info "downloading: ${MODEL_SLUG}"
-  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" )
+  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" ) >>"${LOG_FILE}" 2>&1
   local downloaded="${ROOT}/models/ggml-${MODEL_SLUG}.bin"
   [ -s "${downloaded}" ] || die "model download failed: ${downloaded}"
   install -m 0644 "${downloaded}" "${model_file}"
@@ -608,10 +781,16 @@ write_manifest() {
 verify_install() {
   step "verify"
   [ -x "${BIN_DIR}/whisper-cli" ] || die "missing: ${BIN_DIR}/whisper-cli"
-  "${BIN_DIR}/whisper-cli" --help >/dev/null 2>&1 || die "whisper-cli failed to run"
+  "${BIN_DIR}/whisper-cli" --help >>"${LOG_FILE}" 2>&1 || die "whisper-cli failed to run"
   [ -x "${BIN_DIR}/asryx" ] || die "missing: ${BIN_DIR}/asryx"
   ok "engine ok"
   ok "toggle ok"
+
+  # runtime contract tools must exist (product)
+  has_cmd notify-send || die "missing runtime tool: notify-send"
+  (has_cmd pw-record || has_cmd arecord) || die "missing runtime tool: pw-record/arecord"
+  (has_cmd wl-copy || has_cmd xclip) || die "missing runtime tool: wl-copy/xclip"
+  ok "runtime tools ok"
 
   if [ "${WITH_MODEL}" -eq 1 ]; then
     local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
@@ -619,15 +798,22 @@ verify_install() {
     ok "model ok"
   fi
 
-  echo
+  _emit ""
   hr
-  echo -e "${bold}hyprland example:${nc}"
-  echo "  bind = ALT, W, exec, asryx"
+  _emit "${bold}usage:${nc}"
+  _emit "  asryx"
+  _emit ""
+  _emit "${bold}hyprland example:${nc}"
+  _emit "  bind = ALT, W, exec, asryx"
   hr
 }
 
 main() {
   trap on_err ERR
+
+  local t_all0 t_all1
+  t_all0="$(ts_now)"
+
   parse_args "$@"
   log_setup
 
@@ -640,8 +826,11 @@ main() {
   confirm_plan
   sudo_warmup
 
-  install_required_missing "${DEPS_BUILD[@]}"
-  install_optional_missing "${DEPS_RUNTIME[@]}"
+  step "deps (build)"
+  install_missing_pkgs "${DEPS_BUILD[@]}"
+  ok "build deps satisfied"
+
+  ensure_runtime_contract
 
   clone_or_update
   build_release
@@ -651,8 +840,10 @@ main() {
   write_env_contract
   write_manifest
   verify_install
+
+  t_all1="$(ts_now)"
   step "done"
-  ok "installed asryx"
+  ok "installed asryx ($(dur "${t_all0}" "${t_all1}"))"
   ok "log: ${LOG_FILE}"
 }
 
