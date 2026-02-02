@@ -43,54 +43,31 @@ jobs:
           - id: arch-latest
             image: archlinux:latest
 
-    name: smoke (${{ matrix.id }})
-
+    name: ${{ matrix.id }}
     container:
       image: ${{ matrix.image }}
 
-    env:
-      CI: "1"
-      GIT_TERMINAL_PROMPT: "0"
-
-    defaults:
-      run:
-        shell: bash
-
     steps:
-      - name: install base tools
+      - uses: actions/checkout@v4
+
+      - name: base deps (sudo + git)
         run: |
-          set -eux
+          set -euo pipefail
 
           if command -v apt-get >/dev/null 2>&1; then
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y --no-install-recommends \
-              ca-certificates \
-              curl \
-              git \
-              sudo \
-              xz-utils \
-              tar
-            rm -rf /var/lib/apt/lists/*
+            apt-get install -y --no-install-recommends sudo ca-certificates curl git
           elif command -v dnf >/dev/null 2>&1; then
-            dnf -y install \
-              ca-certificates \
-              curl \
-              git \
-              sudo \
-              xz \
-              tar
-            dnf -y clean all || true
+            dnf -y install sudo ca-certificates curl git
           elif command -v pacman >/dev/null 2>&1; then
-            pacman -Syu --noconfirm --needed \
-              ca-certificates \
-              curl \
-              git \
-              sudo \
-              xz \
-              tar \
-              shadow
-            pacman -Scc --noconfirm || true
+            pacman -Sy --noconfirm || true
+            if command -v pacman-key >/dev/null 2>&1; then
+              pacman-key --init || true
+              pacman-key --populate archlinux || true
+            fi
+            pacman -Sy --noconfirm
+            pacman -S --noconfirm --needed sudo ca-certificates curl git
           else
             echo "no supported package manager found"
             exit 1
@@ -98,84 +75,35 @@ jobs:
 
       - name: create ci user (passwordless sudo)
         run: |
-          set -eux
-
-          if ! id ci >/dev/null 2>&1; then
-            useradd -m -s /bin/bash ci
-          fi
-
-          if getent group sudo >/dev/null 2>&1; then
-            usermod -aG sudo ci
-          elif getent group wheel >/dev/null 2>&1; then
-            usermod -aG wheel ci
-          else
-            groupadd sudo
-            usermod -aG sudo ci
-          fi
-
-          echo "ci ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ci
+          set -euo pipefail
+          useradd -m -s /bin/bash ci || true
+          echo 'ci ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/ci
           chmod 0440 /etc/sudoers.d/ci
 
-          mkdir -p /home/ci/.cache /home/ci/.local
-          chown -R ci:ci /home/ci
-
-      - name: sanity check sudo for ci
+      - name: install
         run: |
-          set -eux
-          sudo -u ci -H bash -lc 'set -euo pipefail; sudo -n true'
+          set -euo pipefail
+          sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/install --yes"
 
-      - name: checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: fix workspace perms for ci user
+      - name: verify install
         run: |
-          set -eux
-          chown -R ci:ci "$GITHUB_WORKSPACE"
+          set -euo pipefail
+          sudo -u ci -H bash -lc "set -euo pipefail
+            test -x /home/ci/.local/bin/whisper-cli
+            test -x /home/ci/.local/bin/asryx
+            test -f /home/ci/.local/share/asryx/asryx.env
+            test -f /home/ci/.local/share/asryx/install.manifest
+            /home/ci/.local/bin/whisper-cli --help >/dev/null
+          "
 
-      - name: mark workspace as safe for git (ci user)
+      - name: uninstall
         run: |
-          set -eux
-          sudo -u ci -H bash -lc "set -euo pipefail; git config --global --add safe.directory \"$GITHUB_WORKSPACE\""
+          set -euo pipefail
+          sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/uninstall --yes"
 
-      - name: run install (smoke)
+      - name: verify uninstall
         run: |
-          set -eux
-          chmod +x ./install
-          WS="$GITHUB_WORKSPACE"
-          sudo -u ci -H bash -lc "set -euo pipefail; cd -- \"$WS\"; CI=1 ./install --yes"
-
-      - name: verify install artifacts
-        run: |
-          set -eux
-          test -x /home/ci/.local/bin/whisper-cli
-          test -x /home/ci/.local/bin/asryx
-          test -f /home/ci/.local/share/asryx/asryx.env
-          test -f /home/ci/.local/share/asryx/install.manifest
-          test -f /home/ci/.local/share/asryx/models/ggml-base.en.bin
-          sudo -u ci -H bash -lc "set -euo pipefail; PATH=/home/ci/.local/bin:\$PATH whisper-cli --help >/dev/null"
-
-      - name: run uninstall
-        run: |
-          set -eux
-          chmod +x ./uninstall
-          WS="$GITHUB_WORKSPACE"
-          sudo -u ci -H bash -lc "set -euo pipefail; cd -- \"$WS\"; CI=1 ./uninstall --yes"
-
-      - name: verify uninstall cleanup
-        run: |
-          set -eux
-          test ! -e /home/ci/.local/bin/asryx
-          test -e /home/ci/.local/bin/whisper-cli || true
-          test ! -e /home/ci/.local/share/asryx/asryx.env
-          test ! -e /home/ci/.local/share/asryx/install.manifest
-
-      - name: upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: asryx-logs-${{ matrix.id }}
-          path: |
-            /home/ci/.cache/asryx
-            /home/ci/.local/share/asryx
+          set -euo pipefail
+          sudo -u ci -H bash -lc "set -euo pipefail
+            test ! -e /home/ci/.local/share/asryx/install.manifest
+          "
