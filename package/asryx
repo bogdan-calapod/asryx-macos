@@ -1,127 +1,261 @@
 #!/usr/bin/env bash
-setopt errexit nounset pipefail
+set -Eeuo pipefail
 
-autoload -Uz colors
-colors
-log(){  print -P "%F{4}[*]%f $*"; }
-ok(){   print -P "%F{2}[ok]%f $*"; }
-warn(){ print -P "%F{3}[warn]%f $*"; }
-fail(){ print -P "%F{1}[err]%f $*"; exit 1; }
+if [ -t 1 ]; then
+  red=$'\033[0;31m'
+  green=$'\033[0;32m'
+  yellow=$'\033[0;33m'
+  blue=$'\033[0;34m'
+  bold=$'\033[1m'
+  nc=$'\033[0m'
+else
+  red=''; green=''; yellow=''; blue=''; bold=''; nc=''
+fi
 
-notify() {
-  command -v notify-send >/dev/null 2>&1 || return 0
-  notify-send -a asryx "$1" "$2" || true
+log()  { printf "%b\n" "${blue}${bold}[*]${nc} $*"; }
+ok()   { printf "%b\n" "${green}${bold}[ok]${nc} $*"; }
+warn() { printf "%b\n" "${yellow}${bold}[warn]${nc} $*"; }
+fail() { printf "%b\n" "${red}${bold}[err]${nc} $*"; exit 1; }
+
+realpath_portable() {
+  local p="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    readlink -f "$p" 2>/dev/null && return 0
+  fi
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$p" 2>/dev/null && return 0
+  fi
+  if [[ "$p" == */* ]]; then
+    local d b
+    d="$(cd "$(dirname "$p")" && pwd)"
+    b="$(basename "$p")"
+    printf '%s/%s\n' "$d" "$b"
+  else
+    printf '%s/%s\n' "$(pwd)" "$p"
+  fi
 }
 
-SELF="${0:A}"
-PREFIX="${SELF:h:h}"
+trim_ws() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
 
-ENV_FILE="${PREFIX}/share/asryx/asryx.env"
-if [[ -f "$ENV_FILE" ]]; then
-  setopt localoptions allexport
-  source "$ENV_FILE"
-  unsetopt allexport
-fi
-
-ENGINE="${ASRYX_ENGINE:-${ASR_ENGINE:-${PREFIX}/bin/whisper-cli}}"
-MODEL="${ASRYX_MODEL:-${ASR_MODEL:-${PREFIX}/share/asryx/models/ggml-base.en.bin}}"
-
-[[ -x "$ENGINE" ]] || fail "engine not found: $ENGINE (run ./install)"
-[[ -n "$MODEL" ]] || fail "model unset (run ./install or set ASRYX_MODEL)"
-
-RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
-STATE_DIR="$RUNTIME/asryx-$UID"
-CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/asryx"
-mkdir -p "$STATE_DIR" "$CONF_DIR"
-
-PID_FILE="$STATE_DIR/rec.pid"
-WAV_FILE="$STATE_DIR/rec.wav"
-OUT_PREFIX="$STATE_DIR/out"
-TXT_FILE="$OUT_PREFIX.txt"
-
-LOCKDIR="$STATE_DIR/.lock"
-cleanup_lock(){ rmdir "$LOCKDIR" 2>/dev/null || true; }
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-  exit 0
-fi
-trap 'cleanup_lock' EXIT
-
-if command -v pw-record >/dev/null 2>&1; then
-  REC="pw-record"
-elif command -v arecord >/dev/null 2>&1; then
-  REC="arecord"
-else
-  fail "no recorder found (need pipewire tools or alsa-utils)"
-fi
-
-copy_clip() {
-  if command -v wl-copy >/dev/null 2>&1; then
-    wl-copy < "$1"
-  elif command -v xclip >/dev/null 2>&1; then
-    xclip -selection clipboard -i "$1"
-  else
-    warn "no wl-copy/xclip, not copying"
+strip_quotes() {
+  local s="$1"
+  if [[ "$s" =~ ^\"(.*)\"$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
   fi
+  if [[ "$s" =~ ^\'(.*)\'$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s' "$s"
+}
+
+read_contract() {
+  local file="$1"
+  local line key val
+  contract_engine=""
+  contract_model=""
+
+  [ -f "$file" ] || fail "contract missing: $file (run ./package/install)"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    line="$(trim_ws "$line")"
+    [ -n "$line" ] || continue
+    [[ "$line" == *=* ]] || continue
+
+    key="$(trim_ws "${line%%=*}")"
+    val="$(trim_ws "${line#*=}")"
+    val="$(strip_quotes "$val")"
+
+    case "$key" in
+      ASRYX_ENGINE) contract_engine="$val" ;;
+      ASRYX_MODEL) contract_model="$val" ;;
+    esac
+  done < "$file"
+
+  [ -n "$contract_engine" ] || fail "contract invalid: missing ASRYX_ENGINE"
+  [ -n "$contract_model" ] || fail "contract invalid: missing ASRYX_MODEL"
+}
+
+read_home_overrides() {
+  local file="$1"
+  local line key val
+
+  home_model=""
+  home_lang=""
+  home_threads=""
+
+  [ -f "$file" ] || return 0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    line="$(trim_ws "$line")"
+    [ -n "$line" ] || continue
+    [[ "$line" == *=* ]] || continue
+
+    key="$(trim_ws "${line%%=*}")"
+    val="$(trim_ws "${line#*=}")"
+    val="$(strip_quotes "$val")"
+
+    case "$key" in
+      ASRYX_MODEL) home_model="$val" ;;
+      ASRYX_LANG) home_lang="$val" ;;
+      ASRYX_THREADS) home_threads="$val" ;;
+    esac
+  done < "$file"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || fail "missing: $1 (re-run installer)"
 }
 
 threads_default() {
   command -v nproc >/dev/null 2>&1 && nproc || echo 4
 }
 
+copy_clip() {
+  local f="$1"
+  if command -v wl-copy >/dev/null 2>&1; then
+    wl-copy < "$f"
+  elif command -v xclip >/dev/null 2>&1; then
+    xclip -selection clipboard -i "$f"
+  else
+    fail "no clipboard tool (wl-copy/xclip)"
+  fi
+}
+
+notify() {
+  notify-send -a asryx "$1" "$2" >/dev/null 2>&1 || fail "notification failed (notify-send)"
+}
+
+SELF="$(realpath_portable "${BASH_SOURCE[0]}")"
+PREFIX="$(cd "$(dirname "$SELF")/.." && pwd)"
+CONTRACT_FILE="${PREFIX}/share/asryx/asryx.env"
+
+contract_engine=""
+contract_model=""
+read_contract "$CONTRACT_FILE"
+
+ENGINE="$contract_engine"
+MODEL="$contract_model"
+LANG="${ASRYX_LANG:-}"
+THREADS="${ASRYX_THREADS:-}"
+
+if [ -n "${ASRYX_MODEL:-}" ]; then
+  MODEL="${ASRYX_MODEL}"
+fi
+
+HOME_OVERRIDES_FILE="${HOME}/.asryx.env"
+home_model=""
+home_lang=""
+home_threads=""
+read_home_overrides "$HOME_OVERRIDES_FILE"
+
+if [ -n "$home_model" ]; then MODEL="$home_model"; fi
+if [ -n "$home_lang" ]; then LANG="$home_lang"; fi
+if [ -n "$home_threads" ]; then THREADS="$home_threads"; fi
+
+[ -x "$ENGINE" ] || fail "engine not found: $ENGINE (re-run installer)"
+[ -n "$MODEL" ] || fail "model unset"
+[ -s "$MODEL" ] || fail "model missing: $MODEL"
+
+require_cmd notify-send
+require_cmd wc
+
+RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
+STATE_DIR="${RUNTIME}/asryx-${UID}"
+mkdir -p "$STATE_DIR"
+
+PID_FILE="${STATE_DIR}/rec.pid"
+WAV_FILE="${STATE_DIR}/rec.wav"
+OUT_PREFIX="${STATE_DIR}/out"
+TXT_FILE="${OUT_PREFIX}.txt"
+LOCKDIR="${STATE_DIR}/.lock"
+
+cleanup_lock() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+cleanup_ephemeral() {
+  rm -f "$WAV_FILE" 2>/dev/null || true
+  rm -f "$TXT_FILE" 2>/dev/null || true
+}
+trap 'cleanup_lock' EXIT
+
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+  exit 0
+fi
+
+REC=""
+if command -v pw-record >/dev/null 2>&1; then
+  REC="pw-record"
+elif command -v arecord >/dev/null 2>&1; then
+  REC="arecord"
+else
+  fail "no recorder found (pw-record/arecord)"
+fi
+
 transcribe() {
-  [[ -s "$WAV_FILE" ]] || { warn "no audio captured"; return 1; }
-  [[ -s "$MODEL" ]] || fail "model missing: $MODEL"
+  local t
+  t="${THREADS:-$(threads_default)}"
 
   local -a args
-  args=(-m "$MODEL" -f "$WAV_FILE" -t "${ASRYX_THREADS:-${ASR_THREADS:-$(threads_default)}}" -otxt -of "$OUT_PREFIX")
+  args=(-m "$MODEL" -f "$WAV_FILE" -t "$t" -otxt -of "$OUT_PREFIX")
 
-  local lang="${ASRYX_LANG:-${ASR_LANG:-}}"
-  if [[ -n "${lang}" ]]; then
-    args+=(-l "$lang")
+  if [ -n "$LANG" ]; then
+    args+=(-l "$LANG")
   else
     case "$(basename "$MODEL")" in
       *".en.bin") args+=(-l en) ;;
     esac
   fi
 
-  "$ENGINE" "${args[@]}" >/dev/null
-  [[ -s "$TXT_FILE" ]] || fail "no output generated"
+  "$ENGINE" "${args[@]}" >/dev/null 2>&1 || fail "transcription failed"
+  [ -s "$TXT_FILE" ] || fail "no output generated"
 
   copy_clip "$TXT_FILE"
   ok "copied to clipboard ($(wc -w < "$TXT_FILE") words)"
   notify "asryx" "copied transcription to clipboard"
-  return 0
+  cleanup_ephemeral
 }
 
 start_recording() {
+  rm -f "$TXT_FILE" 2>/dev/null || true
   : > "$WAV_FILE"
-  if [[ "$REC" == "pw-record" ]]; then
-    pw-record --rate 16000 --channels 1 --format s16 "$WAV_FILE" &
+
+  if [ "$REC" = "pw-record" ]; then
+    pw-record --rate 16000 --channels 1 --format s16 "$WAV_FILE" >/dev/null 2>&1 &
   else
-    arecord -q -f S16_LE -r 16000 -c 1 "$WAV_FILE" &
+    arecord -q -f S16_LE -r 16000 -c 1 "$WAV_FILE" >/dev/null 2>&1 &
   fi
-  echo $! > "$PID_FILE"
+
+  echo "$!" > "$PID_FILE"
   ok "recording (run again to stop)"
   notify "asryx" "recording..."
 }
 
 stop_recording() {
   local pid
-  pid="$(<"$PID_FILE")"
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 0
+
   if kill -0 "$pid" 2>/dev/null; then
     log "stopping recorder (pid $pid)"
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   fi
+
   rm -f "$PID_FILE" 2>/dev/null || true
 }
 
-if [[ -f "$PID_FILE" ]]; then
-  pid="$(<"$PID_FILE")"
-  if kill -0 "$pid" 2>/dev/null; then
+if [ -f "$PID_FILE" ]; then
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     stop_recording
-    transcribe || true
-    rm -f "$WAV_FILE" 2>/dev/null || true
+    transcribe
     exit 0
   fi
   warn "stale pid, cleaning up"
