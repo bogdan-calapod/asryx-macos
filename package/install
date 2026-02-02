@@ -109,13 +109,8 @@ usage() {
 usage:
   ./package/install [--yes|-y] [--model <slug>] [--help]
 
-choices:
+ops:
   --model <slug>   ggml model slug (default: base.en)
-
-notes:
-  - bash-only
-  - notifications are mandatory (notify-send must exist)
-  - install target is fixed to $HOME/.local
 EOF
 }
 
