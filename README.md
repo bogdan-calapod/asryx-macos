@@ -13,6 +13,7 @@ Effortlessly turn your **voice** into **text**, **offline**, on Linux.
 It will auto-install and auto-compile a [Whisper](https://github.com/ggml-org/whisper.cpp) binary on your machine that talks directly to your CPU’s hardware-level math accelerators. You don’t have to do anything, just run the installer. It **just works** for **you**. All you have to do after is:
 
 You **run** it/keybind **once**: it records.
+
 You **run** it/keybind **again**: it stops, **transcribes**, copies to **clipboard**, and **notifies**.
 
 No daemons. No services. No dotfile edits. No compositor edits. No bloated GUIs, and no runtimes or Docker. You get one toggle command and you wire it to whatever control surface you want.
