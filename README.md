@@ -25,7 +25,7 @@ No daemons. No services. No dotfile edits. No compositor edits. No bloated GUIs,
 
 It uses a PID file to remember the recorder process between invocations, so the second press knows exactly what to stop. It also uses a lock directory so if you mash the key five times in a second, it won’t spawn five recorders or corrupt state. It becomes a clean, debounced switch.
 
-Audio and transcript live in your runtime directory (`$XDG_RUNTIME_DIR` when available, otherwise `/tmp`). On most modern systems, `$XDG_RUNTIME_DIR` is memory-backed.
+Audio and transcript live in your runtime directory (`$XDG_RUNTIME_DIR` when available, otherwise `/tmp`) and are **ephemeral by design**. The clipboard is the persistence boundary.
 
 </details>
 
@@ -34,7 +34,7 @@ Audio and transcript live in your runtime directory (`$XDG_RUNTIME_DIR` when ava
 Clone, then run:
 
 ```sh
-bash ./install
+bash ./package/install
 ```
 
 Starts with a **plan** showing you **exactly** what **will** **happen**, where files go, and what **will not** be **touched**.
@@ -65,38 +65,19 @@ That’s it.
 </details>
 
 <details>
-<summary><strong>Advanced install knobs</strong></summary>
+<summary><strong>Model choice (the only install knob)</strong></summary>
 
 <br/>
 
 ```sh
-./install --help
+bash ./package/install --help
 ```
 
-Useful flags:
+Pick a different ggml model slug:
 
-* `--prefix <path>` install somewhere else.
-* `--no-model` skip model download.
-* `--model <slug>` pick a different ggml model slug, e.g. `tiny.en`, `small.en`, `medium.en` (default is `base.en`).
-* `--sha <commit>` change the pinned whisper.cpp commit (default is pinned for reproducibility).
-* `--clean-build` rebuild from scratch.
-
-</details>
-
-<details>
-<summary><strong>What the installer actually does</strong></summary>
-
-<br/>
-
-It basically builds the engine from source on your machine.
-
-It clones `whisper.cpp`, hard-checks out a pinned commit (reproducible by default, overridable if you want), builds a Release engine, then installs the resulting binaries into your prefix. Engine install is atomic: it stages into a temporary directory, then swaps into place so you never end up with a half-written binary if something goes wrong mid-copy.
-
-It then downloads the ggml model (unless you disable models), installs the toggle script, writes an env contract file you can override, and writes an uninstall manifest containing file paths and SHA256 hashes.
-
-It installs only what it needs through your system package manager, and it will skip optional runtime helpers if your distro doesn’t have them.
-
-Nothing in your shell config is modified. No compositor config is modified. No keybinds are created. No background services are installed.
+```sh
+bash ./package/install --model tiny.en
+```
 
 </details>
 
@@ -123,25 +104,55 @@ bind = ALT, W, exec, asryx
 
 Press once to start recording, press again to stop and transcribe.
 
-If you’re not on Hyprland, bind it anywhere else. It’s just a command. Keyboard daemon, bar button, launcher, shell alias, Stream Deck, whatever, asryx doesn’t care.
+If you’re not on Hyprland, bind it anywhere else. It’s just a command.
 
 ## Supported distros
 
-Tested and supported on Debian-based systems (Debian, Ubuntu, Mint, Pop!_OS, Zorin), Arch, and Fedora.
+Tested and supported on Debian-based systems (Debian, Ubuntu), Arch, and Fedora.
 
-> [!TIP]
-> Advanced users can fork or contribute to adapt it for other distributions.
+## Contract and runtime overrides
 
-## Backend
+asryx does not have a “config directory”.
 
-Today it ships with `whisper.cpp` because it’s fast and local.
+The installer writes a **contract** file once:
 
-The point is the shape: a stable toggle surface plus an engine behind it. The engine is a replaceable component. Your workflow does not change. Your bind does not change.
+```text
+~/.local/share/asryx/asryx.env
+```
+
+This contract contains resolved absolute paths so the toggle stays dumb and deterministic. It is not advertised as a preference surface.
+
+Runtime overrides are intentionally limited to output controls:
+
+* `ASRYX_MODEL`
+* `ASRYX_LANG`
+* `ASRYX_THREADS` (optional)
+
+If you don’t want to export env vars everywhere, you can put them in a single home file:
+
+```text
+~/.asryx.env
+```
+
+Same keys, same meaning. No other keys are read.
+
+## Filesystem semantics
+
+asryx does not create or read a user config directory. `$XDG_CONFIG_HOME/asryx` must not exist.
+
+All runtime artifacts are ephemeral:
+
+* audio + transcript live in `$XDG_RUNTIME_DIR` when available
+* `/tmp` is the fallback
+* nothing is intended to survive reboot
+* after copying + notifying, the runtime files are deleted
+
+No history. No cache. No recovery.
 
 ## Uninstall
 
 ```sh
-bash ./uninstall --yes
+bash ./package/uninstall --yes
 ```
 
 It’s manifest-driven and conservative. It removes what’s installed and won’t blindly delete random files unless you force it.
@@ -168,7 +179,7 @@ By default, everything goes under `$HOME/.local`.
 ~/.local/bin/whisper-cli              engine
 ~/.local/bin/asryx                    toggle command
 ~/.local/share/asryx/models/*.bin     ggml model(s)
-~/.local/share/asryx/asryx.env        env contract (optional overrides)
+~/.local/share/asryx/asryx.env        installer-written contract
 ~/.local/share/asryx/install.manifest uninstall proof
 ~/.local/opt/whisper.cpp              build workspace (pinned checkout)
 ```
@@ -185,9 +196,9 @@ Layout:
 ```
 ~/.local/
 ├── bin/
-│   ├── whisper-cli        # runtime binary
+│   ├── whisper-cli
 │   ├── whisper-stream
-│   └── asryx              # toggle
+│   └── asryx
 ├── share/
 │   └── asryx/
 │       ├── models/
@@ -195,7 +206,7 @@ Layout:
 │       ├── asryx.env
 │       └── install.manifest
 └── opt/
-    └── whisper.cpp/       # pinned build workspace
+    └── whisper.cpp/
 ```
 
 </details>
@@ -205,34 +216,13 @@ Layout:
 
 <br/>
 
-Recording prefers `pw-record` (PipeWire) when available, otherwise, it uses `arecord` (ALSA).
-Clipboard prefers `wl-copy` when available, otherwise, it uses `xclip`.
-Notifications use `notify-send` when available.
+Recording uses `pw-record` (PipeWire) when available, otherwise `arecord` (ALSA).
+Clipboard uses `wl-copy` (Wayland) when available, otherwise `xclip` (X11).
 
-Threads default to `nproc` and can be overridden with `ASRYX_THREADS` (or `ASR_THREADS`).
-Language can be set with `ASRYX_LANG` (or `ASR_LANG`). If you use an `.en` model, it will default to English automatically.
+Notifications are mandatory. `notify-send` must exist. The installer hard-enforces this.
 
-</details>
-
-<details>
-<summary><strong>configuration (optional)</strong></summary>
-
-<br/>
-
-You’re not supposed to need options. But if you insist, set env vars in your shell, your keybind, or in the generated contract file:
-
-`~/.local/share/asryx/asryx.env`
-
-Supported overrides:
-
-`ASRYX_LANG` sets transcription language (`en`, `fr`, `ar`, etc.).
-`ASRYX_THREADS` sets thread count.
-`ASRYX_MODEL` overrides the model path.
-`ASRYX_ENGINE` overrides the engine path.
-
-Compatibility aliases also work:
-
-`ASR_LANG`, `ASR_THREADS`, `ASR_MODEL`, `ASR_ENGINE`.
+Threads default to `nproc` and can be overridden with `ASRYX_THREADS`.
+Language can be set with `ASRYX_LANG`. If you use an `.en` model and don’t set a language, it defaults to English.
 
 </details>
 
