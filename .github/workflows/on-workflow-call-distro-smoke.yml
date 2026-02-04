@@ -16,32 +16,32 @@ jobs:
       matrix:
         include:
           # debian
-          - id: debian-bookworm
-            image: debian:bookworm
-          - id: debian-trixie
-            image: debian:trixie
-          - id: debian-sid
-            image: debian:sid
+          # - id: debian-bookworm
+          #   image: debian:bookworm
+          # - id: debian-trixie
+          #   image: debian:trixie
+          # - id: debian-sid
+          #   image: debian:sid
 
           # ubuntu family
           - id: ubuntu-24.04
             image: ubuntu:24.04
-          - id: popos-22.04
-            image: nycticoracs/pop_os:22.04
+          # - id: popos-22.04
+          #   image: nycticoracs/pop_os:22.04
 
-          # mint
-          - id: mint-21.3
-            image: linuxmintd/mint21.3-amd64:latest
-          - id: mint-22.1
-            image: linuxmintd/mint22.1-amd64:latest
+          # # mint
+          # - id: mint-21.3
+          #   image: linuxmintd/mint21.3-amd64:latest
+          # - id: mint-22.1
+          #   image: linuxmintd/mint22.1-amd64:latest
 
-          # fedora
-          - id: fedora-40
-            image: fedora:40
+          # # fedora
+          # - id: fedora-40
+          #   image: fedora:40
 
-          # arch
-          - id: arch-latest
-            image: archlinux:latest
+          # # arch
+          # - id: arch-latest
+          #   image: archlinux:latest
 
     name: ${{ matrix.id }}
     container:
