@@ -12,11 +12,10 @@ ENGINE_REPO_URL="https://github.com/ggml-org/whisper.cpp.git"
 PREFIX="${HOME}/.local"
 BUILD_SUBDIR="build"
 
-SHA="040510a132f0a9b51d4692b57a6abfd8c9660696"
-MODEL_DEFAULT="base.en"
-MODEL_SLUG="${MODEL_DEFAULT}"
+ENGINE_SHA="040510a132f0a9b51d4692b57a6abfd8c9660696"
 
 AUTO_YES=0
+MODEL_SLUGS=()
 
 if [ -t 1 ]; then
   red=$'\033[0;31m'
@@ -34,8 +33,6 @@ fi
 
 LOG_FILE=""
 
-need_sudo() { if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo sudo; fi; }
-
 _emit() {
   printf "%b\n" "$*"
   if [ -n "${LOG_FILE}" ]; then
@@ -50,80 +47,46 @@ info() { _emit "${blue}${bold}i${nc} $*"; }
 step() { _emit ""; _emit "${magenta}${bold}==>${nc} $*"; }
 hr()   { _emit "${cyan}${dim}------------------------------------------------------------${nc}"; }
 
-ts_now() { date +%s; }
-dur() {
-  local a="$1" b="$2" d
-  d=$((b - a))
-  printf "%ss" "${d}"
-}
-
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
+need_sudo() { if [ "${EUID:-$(id -u)}" -ne 0 ]; then echo sudo; fi; }
 
-PM=""
-PM_UPDATED=0
-PM_PREPARED=0
-
-APT_BUILD_PKGS=(
-  ca-certificates
-  curl
-  git
-  build-essential
-  cmake
-  pkg-config
-  ninja-build
-)
-
-DNF_BUILD_PKGS=(
-  ca-certificates
-  curl
-  git
-  gcc
-  gcc-c++
-  make
-  cmake
-  pkgconf-pkg-config
-  ninja-build
-)
-
-PAC_BUILD_PKGS=(
-  ca-certificates
-  curl
-  git
-  gcc
-  make
-  cmake
-  pkgconf
-  ninja
-)
-
-DEPS_BUILD=()
-
-PKG_AUDIO_PW=""
-PKG_AUDIO_ALSA=""
-PKG_CLIP_WL=""
-PKG_CLIP_X11=""
-PKG_NOTIFY=""
+ts_now() { date +%s; }
+dur() { local a="$1" b="$2"; printf "%ss" "$((b - a))"; }
 
 usage() {
   cat <<'EOF'
 usage:
-  ./package/install [--yes|-y] [--model <slug>] [--help]
+  ./package/install [--yes|-y] [--model <slug>]... [--help]
 
-ops:
-  --model <slug>   ggml model slug (default: base.en)
+notes:
+  - you can pass --model multiple times
+  - re-running install with a new model installs it next to existing models
 EOF
+}
+
+is_safe_slug() {
+  local s="$1"
+  [[ "$s" =~ ^[a-z0-9][a-z0-9._-]*$ ]]
 }
 
 parse_args() {
   while [ "${#}" -gt 0 ]; do
     case "$1" in
       --yes|-y) AUTO_YES=1 ;;
-      --model) MODEL_SLUG="${2:-}"; [ -n "${MODEL_SLUG}" ] || die "missing value for --model"; shift ;;
+      --model)
+        [ -n "${2:-}" ] || die "missing value for --model"
+        is_safe_slug "${2}" || die "invalid model slug: ${2}"
+        MODEL_SLUGS+=("${2}")
+        shift
+        ;;
       --help|-h) usage; exit 0 ;;
       *) die "unknown arg: $1 (try --help)" ;;
     esac
     shift
   done
+  if [ "${#MODEL_SLUGS[@]}" -eq 0 ]; then
+    MODEL_SLUGS=("base.en")
+  fi
 }
 
 log_setup() {
@@ -147,6 +110,22 @@ on_err() {
   warn "log: ${LOG_FILE}"
   exit "${code}"
 }
+
+PM=""
+PM_UPDATED=0
+PM_PREPARED=0
+
+APT_BUILD_PKGS=(ca-certificates curl git build-essential cmake pkg-config ninja-build)
+DNF_BUILD_PKGS=(ca-certificates curl git gcc gcc-c++ make cmake pkgconf-pkg-config ninja-build)
+PAC_BUILD_PKGS=(ca-certificates curl git gcc make cmake pkgconf ninja)
+
+DEPS_BUILD=()
+
+PKG_AUDIO_PW=""
+PKG_AUDIO_ALSA=""
+PKG_CLIP_WL=""
+PKG_CLIP_X11=""
+PKG_NOTIFY=""
 
 detect_pm() {
   if has_cmd apt-get; then
@@ -187,16 +166,13 @@ set_deps_for_pm() {
       PKG_CLIP_X11="xclip"
       PKG_NOTIFY="libnotify"
       ;;
-    *)
-      die "unsupported package manager: ${PM}"
-      ;;
+    *) die "unsupported package manager: ${PM}" ;;
   esac
 }
 
 pm_prepare_once() {
   [ "${PM_PREPARED}" -eq 0 ] || return 0
   PM_PREPARED=1
-
   case "${PM}" in
     apt) has_cmd dpkg || die "dpkg not found (apt detected but dpkg missing)" ;;
     dnf) has_cmd rpm || die "rpm not found (dnf detected but rpm missing)" ;;
@@ -207,7 +183,6 @@ pm_prepare_once() {
 pm_update_once() {
   [ "${PM_UPDATED}" -eq 0 ] || return 0
   PM_UPDATED=1
-
   step "pm index"
   case "${PM}" in
     apt)
@@ -244,22 +219,13 @@ pkg_installed() {
 pm_install_many() {
   pm_prepare_once
   pm_update_once
-
   step "pm install"
   info "installing: $*"
   case "${PM}" in
-    apt)
-      $(need_sudo) apt-get install -y --no-install-recommends "$@" >>"${LOG_FILE}" 2>&1
-      ;;
-    dnf)
-      $(need_sudo) dnf -y install --setopt=install_weak_deps=False "$@" >>"${LOG_FILE}" 2>&1
-      ;;
-    pacman)
-      $(need_sudo) pacman -S --noconfirm --needed "$@" >>"${LOG_FILE}" 2>&1
-      ;;
-    *)
-      die "unsupported package manager: ${PM}"
-      ;;
+    apt) $(need_sudo) apt-get install -y --no-install-recommends "$@" >>"${LOG_FILE}" 2>&1 ;;
+    dnf) $(need_sudo) dnf -y install --setopt=install_weak_deps=False "$@" >>"${LOG_FILE}" 2>&1 ;;
+    pacman) $(need_sudo) pacman -S --noconfirm --needed "$@" >>"${LOG_FILE}" 2>&1 ;;
+    *) die "unsupported package manager: ${PM}" ;;
   esac
   ok "installed: $*"
 }
@@ -277,13 +243,22 @@ install_missing_pkgs() {
   pm_install_many "${missing[@]}"
 }
 
+session_type() {
+  if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    echo "wayland"
+  elif [ "${XDG_SESSION_TYPE:-}" = "x11" ] || [ -n "${DISPLAY:-}" ]; then
+    echo "x11"
+  else
+    echo "unknown"
+  fi
+}
+
 confirm_plan() {
   if [ "${AUTO_YES}" -eq 1 ]; then
     ok "auto mode: skipping confirmation (--yes/-y)"
     return 0
   fi
   _emit ""
-  info "this will install packages via ${PM} and write under: ${PREFIX}"
   info "type ${bold}y${nc} to proceed"
   printf "%bproceed?%b " "${cyan}" "${nc}"
   local ans
@@ -297,7 +272,6 @@ sudo_warmup() {
     die "refusing to run as root"
   fi
   has_cmd sudo || die "sudo not found (install sudo)"
-  info "sudo is required for system deps"
   if sudo -n true >/dev/null 2>&1; then
     ok "sudo: non-interactive ok"
     return 0
@@ -314,8 +288,9 @@ BUILD=""
 BIN_DIR=""
 SHARE_DIR=""
 MODELS_DIR=""
-ENV_FILE=""
-MANIFEST=""
+CONTRACT_FILE=""
+MANIFEST_FILE=""
+USER_ENV_FILE=""
 
 set_paths() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -324,18 +299,9 @@ set_paths() {
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
-  ENV_FILE="${SHARE_DIR}/asryx.env"
-  MANIFEST="${SHARE_DIR}/install.manifest"
-}
-
-session_type() {
-  if [ "${XDG_SESSION_TYPE:-}" = "wayland" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-    echo "wayland"
-  elif [ "${XDG_SESSION_TYPE:-}" = "x11" ] || [ -n "${DISPLAY:-}" ]; then
-    echo "x11"
-  else
-    echo "unknown"
-  fi
+  CONTRACT_FILE="${SHARE_DIR}/asryx.env"
+  MANIFEST_FILE="${SHARE_DIR}/install.manifest"
+  USER_ENV_FILE="${HOME}/.asryx.env"
 }
 
 print_plan() {
@@ -343,31 +309,31 @@ print_plan() {
   hr
   _emit "${bold}asryx installer${nc}"
   _emit ""
-  _emit "prefix:     ${PREFIX}"
-  _emit "repo:       ${ENGINE_REPO_URL}"
-  _emit "commit:     ${SHA}"
-  _emit "workspace:  ${ROOT}"
-  _emit "build dir:  ${BUILD}"
-  _emit "bin dir:    ${BIN_DIR}"
-  _emit "share dir:  ${SHARE_DIR}"
-  _emit "models dir: ${MODELS_DIR}"
-  _emit "contract:   ${ENV_FILE}"
-  _emit "manifest:   ${MANIFEST}"
-  _emit "pm:         ${PM}"
-  _emit "model:      ${MODEL_SLUG}"
-  _emit "session:    $(session_type)"
+  _emit "prefix:        ${PREFIX}"
+  _emit "repo:          ${ENGINE_REPO_URL}"
+  _emit "engine commit: ${ENGINE_SHA}"
+  _emit "workspace:     ${ROOT}"
+  _emit "build dir:     ${BUILD}"
+  _emit "bin dir:       ${BIN_DIR}"
+  _emit "share dir:     ${SHARE_DIR}"
+  _emit "models dir:    ${MODELS_DIR}"
+  _emit "contract:      ${CONTRACT_FILE}"
+  _emit "manifest:      ${MANIFEST_FILE}"
+  _emit "user config:   ${USER_ENV_FILE}"
+  _emit "pm:            ${PM}"
+  _emit "session:       $(session_type)"
+  _emit "models:        ${MODEL_SLUGS[*]}"
   hr
   _emit "will do:"
   _emit "  - install build deps (${PM})"
-  _emit "  - ensure runtime contract tools exist (recorder + clipboard + notify)"
+  _emit "  - enforce runtime contract tools exist (recorder + clipboard + notify)"
   _emit "  - clone/update engine repo and hard-checkout pinned commit"
-  _emit "  - build Release engine"
-  _emit "  - install engine binaries into <prefix>/bin"
-  _emit "  - install toggle into <prefix>/bin/asryx"
-  _emit "  - install model into <prefix>/share/asryx/models"
-  _emit "  - write contract to <prefix>/share/asryx/asryx.env"
-  _emit "  - write manifest for safe uninstall"
-  _emit ""
+  _emit "  - build Release whisper-cli (or verify existing install)"
+  _emit "  - install whisper-cli into <prefix>/bin"
+  _emit "  - install asryx toggle into <prefix>/bin/asryx"
+  _emit "  - download and install requested model(s) into <prefix>/share/asryx/models"
+  _emit "  - write internal contract + uninstall manifest"
+  _emit "  - create ~/.asryx.env if missing (sets ASRYX_MODEL once)"
   hr
 }
 
@@ -390,9 +356,7 @@ ensure_runtime_contract() {
   else
     info "audio: no recorder found -> installing preferred (${PKG_AUDIO_PW})"
     pm_install_many "${PKG_AUDIO_PW}" || true
-    if has_cmd pw-record; then
-      ok "audio: pw-record (installed)"
-    fi
+    if has_cmd pw-record; then ok "audio: pw-record (installed)"; fi
     if ! has_cmd pw-record && ! has_cmd arecord; then
       info "audio: installing fallback (${PKG_AUDIO_ALSA})"
       pm_install_many "${PKG_AUDIO_ALSA}"
@@ -428,10 +392,6 @@ ensure_runtime_contract() {
     else
       warn "clipboard: session unknown -> installing both providers"
       pm_install_many "${PKG_CLIP_WL}" "${PKG_CLIP_X11}" || true
-      if ! has_cmd wl-copy && ! has_cmd xclip; then
-        pm_install_many "${PKG_CLIP_WL}" || true
-        pm_install_many "${PKG_CLIP_X11}" || true
-      fi
       (has_cmd wl-copy || has_cmd xclip) || die "no clipboard tool after install"
       ok "clipboard: provider installed"
     fi
@@ -455,20 +415,14 @@ clone_or_update() {
     git clone "${ENGINE_REPO_URL}" "${ROOT}" >>"${LOG_FILE}" 2>&1
   fi
 
-  git -C "${ROOT}" cat-file -e "${SHA}^{commit}" >>"${LOG_FILE}" 2>&1 || die "commit not found: ${SHA}"
-  git -C "${ROOT}" checkout -f "${SHA}" >>"${LOG_FILE}" 2>&1
-  git -C "${ROOT}" reset --hard "${SHA}" >>"${LOG_FILE}" 2>&1
+  git -C "${ROOT}" cat-file -e "${ENGINE_SHA}^{commit}" >>"${LOG_FILE}" 2>&1 || die "commit not found: ${ENGINE_SHA}"
+  git -C "${ROOT}" checkout -f "${ENGINE_SHA}" >>"${LOG_FILE}" 2>&1
+  git -C "${ROOT}" reset --hard "${ENGINE_SHA}" >>"${LOG_FILE}" 2>&1
   git -C "${ROOT}" submodule update --init --recursive >>"${LOG_FILE}" 2>&1 || true
-  ok "source pinned: ${SHA}"
+  ok "source pinned: ${ENGINE_SHA}"
 }
 
-nproc_fallback() {
-  if has_cmd nproc; then
-    nproc
-  else
-    echo 4
-  fi
-}
+nproc_fallback() { has_cmd nproc && nproc || echo 4; }
 
 build_release() {
   step "build"
@@ -487,73 +441,89 @@ build_release() {
   ok "built whisper-cli ($(dur "${t0}" "${t1}"))"
 }
 
-install_binaries_atomic() {
-  step "install (engine bin)"
+install_engine_atomic() {
+  step "install (engine)"
   mkdir -p "${BIN_DIR}"
-
-  local stage="${BIN_DIR}/.${APP_ID}.stage.${timestamp}"
-  mkdir -p "${stage}"
 
   local cli_src="${BUILD}/bin/whisper-cli"
   local cli_dst="${BIN_DIR}/whisper-cli"
-  local cli_bak="${BIN_DIR}/.whisper-cli.bak.${timestamp}"
-
   [ -x "${cli_src}" ] || die "missing built binary: ${cli_src}"
+
+  local stage="${BIN_DIR}/.${APP_ID}.stage.${timestamp}"
+  mkdir -p "${stage}"
   install -m 0755 "${cli_src}" "${stage}/whisper-cli"
 
+  local bak="${BIN_DIR}/.whisper-cli.bak.${timestamp}"
   if [ -f "${cli_dst}" ] || [ -L "${cli_dst}" ]; then
-    mv -f "${cli_dst}" "${cli_bak}" >>"${LOG_FILE}" 2>&1 || true
+    mv -f "${cli_dst}" "${bak}" >>"${LOG_FILE}" 2>&1 || true
   fi
   mv -f "${stage}/whisper-cli" "${cli_dst}"
   rm -rf "${stage}" >>"${LOG_FILE}" 2>&1 || true
-  rm -f "${cli_bak}" >>"${LOG_FILE}" 2>&1 || true
+  rm -f "${bak}" >>"${LOG_FILE}" 2>&1 || true
   ok "installed: ${cli_dst}"
-}
-
-download_model() {
-  step "install (model)"
-  mkdir -p "${MODELS_DIR}"
-
-  local canonical="${MODELS_DIR}/ggml-model.bin"
-  local tmp="${MODELS_DIR}/.ggml-model.${timestamp}.tmp"
-
-  local dl="${ROOT}/models/download-ggml-model.sh"
-  [ -f "${dl}" ] || die "missing model downloader: ${dl}"
-
-  local downloaded="${ROOT}/models/ggml-${MODEL_SLUG}.bin"
-
-  if [ ! -s "${downloaded}" ]; then
-    info "downloading: ${MODEL_SLUG}"
-    (
-      cd "${ROOT}"
-      bash "./models/download-ggml-model.sh" "${MODEL_SLUG}"
-    ) 2>&1 | tee -a "${LOG_FILE}"
-  else
-    ok "cached download present: $(basename "${downloaded}")"
-  fi
-
-  [ -s "${downloaded}" ] || die "model download failed: ${downloaded}"
-
-  install -m 0644 "${downloaded}" "${tmp}"
-  mv -f "${tmp}" "${canonical}"
-
-  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-current.bin"
-  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-base.en.bin"
-  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
-
-  ok "model active: $(basename "${canonical}") (slug=${MODEL_SLUG})"
 }
 
 install_toggle() {
   step "install (toggle)"
   mkdir -p "${BIN_DIR}"
-
   local src="${SCRIPT_DIR}/asryx"
-  [ -f "${src}" ] || die "toggle file not found next to installer: ${src}"
-
   local dst="${BIN_DIR}/asryx"
+  [ -f "${src}" ] || die "toggle file not found: ${src}"
   install -m 0755 "${src}" "${dst}"
   ok "installed: ${dst}"
+}
+
+model_src_path() { printf '%s' "${ROOT}/models/ggml-$1.bin"; }
+model_dst_path() { printf '%s' "${MODELS_DIR}/ggml-$1.bin"; }
+
+download_model_if_needed() {
+  local slug="$1"
+  local dl="${ROOT}/models/download-ggml-model.sh"
+  [ -f "${dl}" ] || die "missing model downloader: ${dl}"
+
+  local src
+  src="$(model_src_path "${slug}")"
+
+  if [ -s "${src}" ]; then
+    ok "model source cached: $(basename "${src}")"
+    return 0
+  fi
+
+  step "download (model ${slug})"
+  (
+    cd "${ROOT}"
+    bash "./models/download-ggml-model.sh" "${slug}"
+  ) 2>&1 | tee -a "${LOG_FILE}"
+
+  [ -s "${src}" ] || die "model download failed: ${src}"
+  ok "downloaded: $(basename "${src}")"
+}
+
+install_one_model_atomic() {
+  local slug="$1"
+  mkdir -p "${MODELS_DIR}"
+
+  local src dst tmp
+  src="$(model_src_path "${slug}")"
+  dst="$(model_dst_path "${slug}")"
+  tmp="${MODELS_DIR}/.ggml-${slug}.${timestamp}.tmp"
+
+  [ -s "${src}" ] || die "missing downloaded model: ${src}"
+
+  if [ -s "${dst}" ]; then
+    local a b
+    a="$(sha256 "${src}")"
+    b="$(sha256 "${dst}")"
+    if [ "${a}" = "${b}" ]; then
+      ok "model already installed: $(basename "${dst}")"
+      return 0
+    fi
+    warn "model exists but differs, replacing: $(basename "${dst}")"
+  fi
+
+  install -m 0644 "${src}" "${tmp}"
+  mv -f "${tmp}" "${dst}"
+  ok "installed model: $(basename "${dst}")"
 }
 
 write_contract() {
@@ -561,14 +531,42 @@ write_contract() {
   mkdir -p "${SHARE_DIR}"
 
   local engine="${BIN_DIR}/whisper-cli"
-  local model="${MODELS_DIR}/ggml-model.bin"
+  local default_model="${MODEL_SLUGS[0]}"
 
   {
     echo "ASRYX_ENGINE=${engine}"
-    echo "ASRYX_MODEL=${model}"
-  } > "${ENV_FILE}"
+    echo "ASRYX_MODELS_DIR=${MODELS_DIR}"
+    echo "ASRYX_DEFAULT_MODEL=${default_model}"
+  } > "${CONTRACT_FILE}"
 
-  ok "wrote: ${ENV_FILE}"
+  ok "wrote: ${CONTRACT_FILE}"
+}
+
+create_user_env_if_missing() {
+  step "user config"
+  if [ -f "${USER_ENV_FILE}" ]; then
+    ok "exists: ${USER_ENV_FILE} (leaving as is)"
+    return 0
+  fi
+  local m="${MODEL_SLUGS[0]}"
+  {
+    echo "ASRYX_MODEL=${m}"
+  } > "${USER_ENV_FILE}"
+  ok "created: ${USER_ENV_FILE} (ASRYX_MODEL=${m})"
+}
+
+read_existing_models_from_manifest() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  local line k v
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      model_path=*)
+        v="${line#model_path=}"
+        [ -n "$v" ] && echo "$v"
+        ;;
+    esac
+  done < "$file"
 }
 
 write_manifest() {
@@ -577,22 +575,41 @@ write_manifest() {
 
   local engine="${BIN_DIR}/whisper-cli"
   local toggle="${BIN_DIR}/asryx"
-  local model="${MODELS_DIR}/ggml-model.bin"
-  local model_link="${MODELS_DIR}/ggml-current.bin"
+
+  [ -x "${engine}" ] || die "engine missing: ${engine}"
+  [ -x "${toggle}" ] || die "toggle missing: ${toggle}"
+
+  declare -A models_map=()
+
+  if [ -f "${MANIFEST_FILE}" ]; then
+    while IFS= read -r p || [ -n "$p" ]; do
+      if [ -n "$p" ] && [ -f "$p" ]; then
+        models_map["$p"]="$(sha256 "$p")"
+      fi
+    done < <(read_existing_models_from_manifest "${MANIFEST_FILE}")
+  fi
+
+  local slug dst
+  for slug in "${MODEL_SLUGS[@]}"; do
+    dst="$(model_dst_path "${slug}")"
+    [ -s "${dst}" ] || die "installed model missing: ${dst}"
+    models_map["$dst"]="$(sha256 "$dst")"
+  done
 
   {
     echo "app_id=${APP_ID}"
     echo "timestamp=${timestamp}"
     echo "prefix=${PREFIX}"
     echo "engine_repo_url=${ENGINE_REPO_URL}"
-    echo "engine_sha=${SHA}"
+    echo "engine_sha=${ENGINE_SHA}"
     echo "workspace=${ROOT}"
     echo "build_dir=${BUILD}"
     echo "bin_dir=${BIN_DIR}"
     echo "share_dir=${SHARE_DIR}"
     echo "models_dir=${MODELS_DIR}"
-    echo "env_path=${ENV_FILE}"
-    echo "env_sha256=$(sha256 "${ENV_FILE}")"
+
+    echo "contract_path=${CONTRACT_FILE}"
+    echo "contract_sha256=$(sha256 "${CONTRACT_FILE}")"
 
     echo "engine_cli_path=${engine}"
     echo "engine_cli_sha256=$(sha256 "${engine}")"
@@ -600,13 +617,13 @@ write_manifest() {
     echo "toggle_path=${toggle}"
     echo "toggle_sha256=$(sha256 "${toggle}")"
 
-    echo "model_slug=${MODEL_SLUG}"
-    echo "model_path=${model}"
-    echo "model_sha256=$(sha256 "${model}")"
-    echo "model_link_current=${model_link}"
-  } > "${MANIFEST}"
+    for dst in "${!models_map[@]}"; do
+      echo "model_path=${dst}"
+      echo "model_sha256=${models_map["$dst"]}"
+    done
+  } > "${MANIFEST_FILE}"
 
-  ok "wrote: ${MANIFEST}"
+  ok "wrote: ${MANIFEST_FILE}"
 }
 
 verify_install() {
@@ -622,16 +639,20 @@ verify_install() {
   (has_cmd wl-copy || has_cmd xclip) || die "missing runtime tool: wl-copy/xclip"
   ok "runtime tools ok"
 
-  [ -s "${MODELS_DIR}/ggml-model.bin" ] || die "missing model: ${MODELS_DIR}/ggml-model.bin"
-  ok "model ok"
+  local slug dst
+  for slug in "${MODEL_SLUGS[@]}"; do
+    dst="$(model_dst_path "${slug}")"
+    [ -s "${dst}" ] || die "missing model: ${dst}"
+  done
+  ok "models ok"
 
   _emit ""
   hr
   _emit "${bold}usage:${nc}"
   _emit "  asryx"
   _emit ""
-  _emit "${bold}hyprland example:${nc}"
-  _emit "  bind = ALT, W, exec, asryx"
+  _emit "${bold}switch model:${nc}"
+  _emit "  echo ASRYX_MODEL=large-v3-turbo > ~/.asryx.env"
   hr
 }
 
@@ -661,10 +682,19 @@ main() {
 
   clone_or_update
   build_release
-  install_binaries_atomic
-  download_model
+  install_engine_atomic
   install_toggle
+
+  step "models"
+  mkdir -p "${MODELS_DIR}"
+  local slug
+  for slug in "${MODEL_SLUGS[@]}"; do
+    download_model_if_needed "${slug}"
+    install_one_model_atomic "${slug}"
+  done
+
   write_contract
+  create_user_env_if_missing
   write_manifest
   verify_install
 

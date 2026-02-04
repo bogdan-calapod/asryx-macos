@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -21,7 +22,7 @@ fail() {
   if command -v notify-send >/dev/null 2>&1; then
     notify-send -a asryx "asryx" "$msg" >/dev/null 2>&1 || true
   fi
-  printf "%b\n" "${red}${bold}[err]${nc} $msg"
+  printf "%b\n" "${red}${bold}[err]${nc} $msg" >&2
   exit 1
 }
 
@@ -52,80 +53,49 @@ trim_ws() {
 
 strip_quotes() {
   local s="$1"
-  if [[ "$s" =~ ^\"(.*)\"$ ]]; then
-    printf '%s' "${BASH_REMATCH[1]}"
+  if [[ "$s" =~ ^\"(.*)\"$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; return 0; fi
+  if [[ "$s" =~ ^\'(.*)\'$ ]]; then printf '%s' "${BASH_REMATCH[1]}"; return 0; fi
+  printf '%s' "$s"
+}
+
+expand_home() {
+  local s="$1"
+  if [[ "$s" == "~/"* ]]; then
+    printf '%s' "${HOME}/${s#~/}"
     return 0
   fi
-  if [[ "$s" =~ ^\'(.*)\'$ ]]; then
-    printf '%s' "${BASH_REMATCH[1]}"
+  if [[ "$s" == "~" ]]; then
+    printf '%s' "${HOME}"
     return 0
   fi
   printf '%s' "$s"
 }
 
-read_contract() {
+load_kv_file() {
   local file="$1"
   local line key val
-  contract_engine=""
-  contract_model=""
-
-  [ -f "$file" ] || fail "contract missing: $file (run ./package/install)"
-
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%%#*}"
-    line="$(trim_ws "$line")"
-    [ -n "$line" ] || continue
-    [[ "$line" == *=* ]] || continue
-
-    key="$(trim_ws "${line%%=*}")"
-    val="$(trim_ws "${line#*=}")"
-    val="$(strip_quotes "$val")"
-
-    case "$key" in
-      ASRYX_ENGINE) contract_engine="$val" ;;
-      ASRYX_MODEL) contract_model="$val" ;;
-    esac
-  done < "$file"
-
-  [ -n "$contract_engine" ] || fail "contract invalid: missing ASRYX_ENGINE"
-  [ -n "$contract_model" ] || fail "contract invalid: missing ASRYX_MODEL"
-}
-
-read_home_overrides() {
-  local file="$1"
-  local line key val
-
-  home_model=""
-  home_lang=""
-  home_threads=""
-
   [ -f "$file" ] || return 0
-
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
     line="$(trim_ws "$line")"
     [ -n "$line" ] || continue
     [[ "$line" == *=* ]] || continue
-
     key="$(trim_ws "${line%%=*}")"
     val="$(trim_ws "${line#*=}")"
     val="$(strip_quotes "$val")"
-
+    val="$(expand_home "$val")"
     case "$key" in
-      ASRYX_MODEL) home_model="$val" ;;
-      ASRYX_LANG) home_lang="$val" ;;
-      ASRYX_THREADS) home_threads="$val" ;;
+      ASRYX_MODEL) kv_model="$val" ;;
+      ASRYX_LANG) kv_lang="$val" ;;
+      ASRYX_THREADS) kv_threads="$val" ;;
+      ASRYX_RUNTIME_DIR) kv_runtime_dir="$val" ;;
     esac
   done < "$file"
 }
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "missing: $1 (re-run installer)"
-}
+require_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing: $1 (re-run ./package/install)"; }
 
-threads_default() {
-  command -v nproc >/dev/null 2>&1 && nproc || echo 4
-}
+threads_default() { command -v nproc >/dev/null 2>&1 && nproc || echo 4; }
 
 copy_clip() {
   local f="$1"
@@ -147,96 +117,119 @@ choose_runtime_dir() {
   local d
   if [ -n "${ASRYX_RUNTIME_DIR:-}" ]; then
     d="${ASRYX_RUNTIME_DIR}"
-    [ -d "$d" ] || mkdir -p "$d" 2>/dev/null || true
+    mkdir -p "$d" 2>/dev/null || true
     [ -d "$d" ] && [ -w "$d" ] && { printf '%s' "$d"; return 0; }
   fi
-
   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ] && [ -w "${XDG_RUNTIME_DIR}" ]; then
     printf '%s' "${XDG_RUNTIME_DIR}"
     return 0
   fi
-
   if [ -d "/run/user/${UID}" ] && [ -w "/run/user/${UID}" ]; then
     printf '%s' "/run/user/${UID}"
     return 0
   fi
-
   printf '%s' "/tmp"
 }
 
 resolve_model_path() {
-  local m="$1"
-  [ -n "$m" ] || { printf '%s' "$m"; return 0; }
+  local selector="$1"
+  local models_dir="$2"
 
-  if [[ "$m" == *"/"* ]] || [[ "$m" == ./* ]] || [[ "$m" == ../* ]]; then
-    printf '%s' "$m"
+  [ -n "$selector" ] || { printf '%s' ""; return 0; }
+
+  selector="$(expand_home "$selector")"
+
+  if [[ "$selector" == *"/"* ]] || [[ "$selector" == ./* ]] || [[ "$selector" == ../* ]]; then
+    printf '%s' "$selector"
     return 0
   fi
 
-  if [[ "$m" == ggml-*.bin ]]; then
-    printf '%s' "${PREFIX}/share/asryx/models/${m}"
+  if [[ "$selector" == ggml-*.bin ]]; then
+    printf '%s' "${models_dir}/${selector}"
     return 0
   fi
 
-  if [[ "$m" == *.bin ]]; then
-    printf '%s' "${PREFIX}/share/asryx/models/${m}"
+  if [[ "$selector" == *.bin ]]; then
+    printf '%s' "${models_dir}/ggml-${selector}"
     return 0
   fi
 
-  printf '%s' "${PREFIX}/share/asryx/models/ggml-${m}.bin"
+  printf '%s' "${models_dir}/ggml-${selector}.bin"
 }
 
 now_ms() {
   local n
   n="$(date +%s%3N 2>/dev/null || true)"
-  if [[ "$n" =~ ^[0-9]{13,}$ ]]; then
-    printf '%s' "$n"
-    return 0
-  fi
+  if [[ "$n" =~ ^[0-9]{13,}$ ]]; then printf '%s' "$n"; return 0; fi
   printf '%s' "$(( $(date +%s) * 1000 ))"
 }
 
 dir_mtime_sec() {
   local p="$1"
-  if command -v stat >/dev/null 2>&1; then
-    stat -c %Y "$p" 2>/dev/null || echo 0
-  else
-    echo 0
-  fi
+  if command -v stat >/dev/null 2>&1; then stat -c %Y "$p" 2>/dev/null || echo 0; else echo 0; fi
 }
 
 SELF="$(realpath_portable "${BASH_SOURCE[0]}")"
 PREFIX="$(cd "$(dirname "$SELF")/.." && pwd)"
+
 CONTRACT_FILE="${PREFIX}/share/asryx/asryx.env"
+[ -f "$CONTRACT_FILE" ] || fail "install contract missing: ${CONTRACT_FILE} (run ./package/install)"
 
 contract_engine=""
-contract_model=""
-read_contract "$CONTRACT_FILE"
+contract_models_dir=""
+contract_default_model="base.en"
+
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%%#*}"
+  line="$(trim_ws "$line")"
+  [ -n "$line" ] || continue
+  [[ "$line" == *=* ]] || continue
+  key="$(trim_ws "${line%%=*}")"
+  val="$(trim_ws "${line#*=}")"
+  val="$(strip_quotes "$val")"
+  val="$(expand_home "$val")"
+  case "$key" in
+    ASRYX_ENGINE) contract_engine="$val" ;;
+    ASRYX_MODELS_DIR) contract_models_dir="$val" ;;
+    ASRYX_DEFAULT_MODEL) contract_default_model="$val" ;;
+  esac
+done < "$CONTRACT_FILE"
+
+[ -n "$contract_engine" ] || fail "contract invalid: missing ASRYX_ENGINE"
+[ -n "$contract_models_dir" ] || contract_models_dir="${PREFIX}/share/asryx/models"
 
 ENGINE="$contract_engine"
-MODEL="$contract_model"
-LANG="${ASRYX_LANG:-}"
-THREADS="${ASRYX_THREADS:-}"
+MODELS_DIR="$contract_models_dir"
+DEFAULT_MODEL="$contract_default_model"
 
-if [ -n "${ASRYX_MODEL:-}" ]; then
-  MODEL="${ASRYX_MODEL}"
+[ -x "$ENGINE" ] || fail "engine not found: $ENGINE (re-run ./package/install)"
+[ -d "$MODELS_DIR" ] || fail "models dir missing: $MODELS_DIR (re-run ./package/install)"
+
+kv_model=""; kv_lang=""; kv_threads=""; kv_runtime_dir=""
+load_kv_file "${HOME}/.asryx.env"
+
+MODEL_SELECTOR="$DEFAULT_MODEL"
+LANG=""
+THREADS=""
+RUNTIME_OVERRIDE=""
+
+if [ -n "$kv_model" ]; then MODEL_SELECTOR="$kv_model"; fi
+if [ -n "$kv_lang" ]; then LANG="$kv_lang"; fi
+if [ -n "$kv_threads" ]; then THREADS="$kv_threads"; fi
+if [ -n "$kv_runtime_dir" ]; then RUNTIME_OVERRIDE="$kv_runtime_dir"; fi
+
+if [ -n "${ASRYX_MODEL:-}" ]; then MODEL_SELECTOR="$(expand_home "${ASRYX_MODEL}")"; fi
+if [ -n "${ASRYX_LANG:-}" ]; then LANG="${ASRYX_LANG}"; fi
+if [ -n "${ASRYX_THREADS:-}" ]; then THREADS="${ASRYX_THREADS}"; fi
+if [ -n "${ASRYX_RUNTIME_DIR:-}" ]; then RUNTIME_OVERRIDE="$(expand_home "${ASRYX_RUNTIME_DIR}")"; fi
+
+if [ -n "$RUNTIME_OVERRIDE" ]; then
+  export ASRYX_RUNTIME_DIR="$RUNTIME_OVERRIDE"
 fi
 
-HOME_OVERRIDES_FILE="${HOME}/.asryx.env"
-home_model=""
-home_lang=""
-home_threads=""
-read_home_overrides "$HOME_OVERRIDES_FILE"
-
-if [ -n "$home_model" ]; then MODEL="$home_model"; fi
-if [ -n "$home_lang" ]; then LANG="$home_lang"; fi
-if [ -n "$home_threads" ]; then THREADS="$home_threads"; fi
-
-MODEL="$(resolve_model_path "$MODEL")"
-
-[ -x "$ENGINE" ] || fail "engine not found: $ENGINE (re-run installer)"
-[ -n "$MODEL" ] || fail "model unset"
-[ -s "$MODEL" ] || fail "model missing: $MODEL"
+MODEL_PATH="$(resolve_model_path "$MODEL_SELECTOR" "$MODELS_DIR")"
+[ -n "$MODEL_PATH" ] || fail "model unset"
+[ -s "$MODEL_PATH" ] || fail "model missing: $MODEL_PATH (install it, then set ASRYX_MODEL in ~/.asryx.env)"
 
 require_cmd notify-send
 require_cmd wc
@@ -257,54 +250,28 @@ LOCK_STALE_SECS=10
 MIN_REC_MS=250
 HAVE_LOCK=0
 
-cleanup_lock() {
-  [ "${HAVE_LOCK}" -eq 1 ] || return 0
-  rmdir "${LOCKDIR}" 2>/dev/null || true
-}
-
-cleanup_ephemeral() {
-  rm -f "$WAV_FILE" 2>/dev/null || true
-  rm -f "$TXT_FILE" 2>/dev/null || true
-  rm -f "$REC_ERR" 2>/dev/null || true
-}
+cleanup_lock() { [ "${HAVE_LOCK}" -eq 1 ] || return 0; rmdir "${LOCKDIR}" 2>/dev/null || true; }
+cleanup_ephemeral() { rm -f "$WAV_FILE" "$TXT_FILE" "$REC_ERR" 2>/dev/null || true; }
 
 trap 'cleanup_lock' EXIT
 
-pid_alive() {
-  local p="$1"
-  [[ "$p" =~ ^[0-9]+$ ]] || return 1
-  kill -0 "$p" 2>/dev/null
-}
+pid_alive() { local p="$1"; [[ "$p" =~ ^[0-9]+$ ]] || return 1; kill -0 "$p" 2>/dev/null; }
 
 acquire_lock() {
-  if mkdir "${LOCKDIR}" 2>/dev/null; then
-    HAVE_LOCK=1
-    return 0
-  fi
+  if mkdir "${LOCKDIR}" 2>/dev/null; then HAVE_LOCK=1; return 0; fi
 
-  local now mt age
+  local now mt age pid=""
   now="$(date +%s)"
   mt="$(dir_mtime_sec "${LOCKDIR}")"
   age=0
-  if [[ "$mt" =~ ^[0-9]+$ ]] && [ "$mt" -gt 0 ]; then
-    age=$((now - mt))
-  fi
+  if [[ "$mt" =~ ^[0-9]+$ ]] && [ "$mt" -gt 0 ]; then age=$((now - mt)); fi
+  if [ -f "$PID_FILE" ]; then pid="$(cat "$PID_FILE" 2>/dev/null || true)"; fi
 
-  local pid=""
-  if [ -f "$PID_FILE" ]; then
-    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-  fi
-
-  if [ -n "$pid" ] && pid_alive "$pid"; then
-    exit 0
-  fi
+  if [ -n "$pid" ] && pid_alive "$pid"; then exit 0; fi
 
   if [ "$age" -ge "$LOCK_STALE_SECS" ]; then
     rm -rf "${LOCKDIR}" 2>/dev/null || true
-    if mkdir "${LOCKDIR}" 2>/dev/null; then
-      HAVE_LOCK=1
-      return 0
-    fi
+    if mkdir "${LOCKDIR}" 2>/dev/null; then HAVE_LOCK=1; return 0; fi
   fi
 
   exit 0
@@ -338,12 +305,12 @@ transcribe() {
   fi
 
   local -a args
-  args=(-m "$MODEL" -f "$WAV_FILE" -t "$t" -otxt -of "$OUT_PREFIX")
+  args=(-m "$MODEL_PATH" -f "$WAV_FILE" -t "$t" -otxt -of "$OUT_PREFIX")
 
   if [ -n "$LANG" ]; then
     args+=(-l "$LANG")
   else
-    case "$(basename "$MODEL")" in
+    case "$(basename "$MODEL_PATH")" in
       *".en.bin") args+=(-l en) ;;
     esac
   fi
@@ -360,10 +327,7 @@ transcribe() {
 start_rec_with() {
   local which="$1"
   : > "$REC_ERR" 2>/dev/null || true
-  rm -f "$PID_FILE" 2>/dev/null || true
-
-  rm -f "$TXT_FILE" 2>/dev/null || true
-  rm -f "$WAV_FILE" 2>/dev/null || true
+  rm -f "$PID_FILE" "$TXT_FILE" "$WAV_FILE" 2>/dev/null || true
   : > "$WAV_FILE"
 
   if [ "$which" = "pw-record" ]; then
@@ -385,9 +349,7 @@ start_rec_with() {
 
   local err
   err="$(cat "$REC_ERR" 2>/dev/null || true)"
-  if [ -n "$err" ]; then
-    fail "recorder failed to start (${which}): ${err}"
-  fi
+  [ -n "$err" ] && fail "recorder failed to start (${which}): ${err}"
   fail "recorder failed to start (${which})"
 }
 
@@ -438,21 +400,19 @@ if [ -f "$PID_FILE" ]; then
 
     stop_recording
     rm -f "$REC_STARTED" 2>/dev/null || true
+    sleep 0.05
     transcribe
     exit 0
   fi
 
   warn "stale pid, cleaning up"
-  rm -f "$PID_FILE" 2>/dev/null || true
-  rm -f "$REC_STARTED" 2>/dev/null || true
+  rm -f "$PID_FILE" "$REC_STARTED" 2>/dev/null || true
 fi
 
 if [ "$REC" = "pw-record" ]; then
-  if start_rec_with "pw-record"; then exit 0; fi
-  if command -v arecord >/dev/null 2>&1; then start_rec_with "arecord"; exit 0; fi
-else
-  if start_rec_with "arecord"; then exit 0; fi
-  if command -v pw-record >/dev/null 2>&1; then start_rec_with "pw-record"; exit 0; fi
+  start_rec_with "pw-record" || true
+  exit 0
 fi
 
-fail "failed to start any recorder"
+start_rec_with "arecord" || true
+exit 0

@@ -17,48 +17,45 @@ PURGE_MODELS_MODE="auto"
 FORCE=0
 
 if [ -t 1 ]; then
-  red='\033[0;31m'
-  green='\033[0;32m'
-  yellow='\033[0;33m'
-  blue='\033[0;34m'
-  magenta='\033[0;35m'
-  cyan='\033[0;36m'
-  bold='\033[1m'
-  dim='\033[2m'
-  nc='\033[0m'
+  red=$'\033[0;31m'
+  green=$'\033[0;32m'
+  yellow=$'\033[0;33m'
+  blue=$'\033[0;34m'
+  magenta=$'\033[0;35m'
+  cyan=$'\033[0;36m'
+  bold=$'\033[1m'
+  dim=$'\033[2m'
+  nc=$'\033[0m'
 else
   red=''; green=''; yellow=''; blue=''; magenta=''; cyan=''; bold=''; dim=''; nc=''
 fi
 
-die() { echo -e "${red}${bold}error:${nc} $*" >&2; exit 1; }
-ok() { echo -e "${green}${bold}✔${nc} $*"; }
-warn() { echo -e "${yellow}${bold}⚠${nc} $*"; }
-info() { echo -e "${blue}${bold}i${nc} $*"; }
-step() { echo -e "\n${magenta}${bold}==>${nc} $*"; }
-hr() { echo -e "${cyan}${dim}------------------------------------------------------------${nc}"; }
+die() { printf "%b\n" "${red}${bold}error:${nc} $*" >&2; exit 1; }
+ok() { printf "%b\n" "${green}${bold}✔${nc} $*"; }
+warn() { printf "%b\n" "${yellow}${bold}⚠${nc} $*"; }
+info() { printf "%b\n" "${blue}${bold}i${nc} $*"; }
+step() { printf "\n%b\n" "${magenta}${bold}==>${nc} $*"; }
+hr() { printf "%b\n" "${cyan}${dim}------------------------------------------------------------${nc}"; }
 
 LOG_FILE=""
 
 usage() {
   cat <<'EOF'
 usage:
-  ./uninstall [--yes|-y] [--prefix <path>]
-              [--purge-workspace|--keep-workspace]
-              [--purge-models|--keep-models]
-              [--force] [--help]
+  ./package/uninstall [--yes|-y] [--prefix <path>]
+                      [--purge-workspace|--keep-workspace]
+                      [--purge-models|--keep-models]
+                      [--force] [--help]
 
 defaults:
   --prefix $HOME/.local
-  purge-workspace: auto (uses manifest when present; otherwise heuristic)
-  purge-models:    auto (only model recorded in manifest)
+  purge-workspace: auto (only if it looks like owned whisper.cpp clone)
+  purge-models:    auto (removes models recorded in manifest)
+  --force bypasses sha verification and manifest gaps
 
-behavior:
-  - refuses to guess paths without manifest proof (unless --force)
-  - removes engine/toggle/env only if they match manifest sha (or --force)
-  - removes recorded model (auto) unless keep-models
-  - removes manifest and prunes empty share dirs
-  - optionally removes workspace (auto-safe)
-  - does not touch system packages
+notes:
+  - ~/.asryx.env is never removed
+  - system packages are never removed
 EOF
 }
 
@@ -106,23 +103,17 @@ sha256() { sha256sum "$1" | awk '{print $1}'; }
 BIN_DIR=""
 SHARE_DIR=""
 MODELS_DIR=""
-ENV_FILE=""
-MANIFEST=""
+CONTRACT_FILE=""
+MANIFEST_FILE=""
 DEFAULT_WORKSPACE=""
 
 set_paths() {
   BIN_DIR="${PREFIX}/bin"
   SHARE_DIR="${PREFIX}/share/${APP_ID}"
   MODELS_DIR="${SHARE_DIR}/models"
-  ENV_FILE="${SHARE_DIR}/asryx.env"
-  MANIFEST="${SHARE_DIR}/install.manifest"
+  CONTRACT_FILE="${SHARE_DIR}/asryx.env"
+  MANIFEST_FILE="${SHARE_DIR}/install.manifest"
   DEFAULT_WORKSPACE="${PREFIX}/opt/whisper.cpp"
-}
-
-mget() {
-  local key="$1" file="$2"
-  [ -f "${file}" ] || return 0
-  awk -F= -v k="$key" '$1==k {sub($1"=",""); print; exit}' "${file}" 2>/dev/null || true
 }
 
 confirm_plan() {
@@ -141,50 +132,35 @@ confirm_plan() {
 print_plan() {
   step "plan"
   hr
-  echo -e "${bold}asryx uninstaller${nc}"
+  printf "%b\n" "${bold}asryx uninstaller${nc}"
   echo
-  echo "prefix:      ${PREFIX}"
-  echo "bin dir:     ${BIN_DIR}"
-  echo "share dir:   ${SHARE_DIR}"
-  echo "models dir:  ${MODELS_DIR}"
-  echo "env:         ${ENV_FILE}"
-  echo "manifest:    ${MANIFEST}"
-  echo "workspace:   ${DEFAULT_WORKSPACE}"
-  echo "purge ws:    ${PURGE_WORKSPACE_MODE}"
-  echo "purge models:${PURGE_MODELS_MODE}"
-  echo "force:       $([ "${FORCE}" -eq 1 ] && echo yes || echo no)"
+  echo "prefix:       ${PREFIX}"
+  echo "bin dir:      ${BIN_DIR}"
+  echo "share dir:    ${SHARE_DIR}"
+  echo "models dir:   ${MODELS_DIR}"
+  echo "contract:     ${CONTRACT_FILE}"
+  echo "manifest:     ${MANIFEST_FILE}"
+  echo "workspace:    ${DEFAULT_WORKSPACE}"
+  echo "purge ws:     ${PURGE_WORKSPACE_MODE}"
+  echo "purge models: ${PURGE_MODELS_MODE}"
+  echo "force:        $([ "${FORCE}" -eq 1 ] && echo yes || echo no)"
   hr
   echo "notes:"
+  echo "  - ~/.asryx.env is never removed"
   echo "  - system packages are never removed"
   echo "  - without a manifest, nothing is removed unless --force"
   hr
 }
 
 require_manifest_or_force() {
-  if [ -f "${MANIFEST}" ]; then
+  if [ -f "${MANIFEST_FILE}" ]; then
     return 0
   fi
   if [ "${FORCE}" -eq 1 ]; then
     warn "manifest missing, proceeding because --force"
     return 0
   fi
-  warn "manifest not found at ${MANIFEST}"
-  die "refusing to remove files without proof (use --force if you insist)"
-}
-
-resolve_manifest_paths() {
-  local key="$1" fallback="$2" outvar="$3"
-  local v
-  v="$(mget "${key}" "${MANIFEST}")"
-  if [ -n "${v}" ]; then
-    printf -v "${outvar}" '%s' "${v}"
-    return 0
-  fi
-  if [ "${FORCE}" -eq 1 ]; then
-    printf -v "${outvar}" '%s' "${fallback}"
-    return 0
-  fi
-  die "manifest missing ${key} (refusing fallback without --force)"
+  die "manifest not found at ${MANIFEST_FILE} (use --force if you insist)"
 }
 
 remove_file_if_matches_manifest() {
@@ -201,9 +177,7 @@ remove_file_if_matches_manifest() {
     return 0
   fi
 
-  if [ -z "${expected_sha}" ]; then
-    die "${label}: manifest sha missing (refusing to delete): ${path}"
-  fi
+  [ -n "${expected_sha}" ] || die "${label}: manifest sha missing (refusing): ${path}"
 
   if [ ! -f "${path}" ]; then
     warn "${label}: not a regular file; leaving in place: ${path}"
@@ -224,73 +198,19 @@ remove_file_if_matches_manifest() {
   ok "${label}: removed"
 }
 
-remove_model_auto_safe() {
-  local model_path="$1" model_sha="$2"
-
-  [ -n "${model_path}" ] || { ok "model: not recorded (skipping)"; return 0; }
-  [ -e "${model_path}" ] || { ok "model: not present (skipping)"; return 0; }
-
-  if [ "${PURGE_MODELS_MODE}" = "no" ]; then
-    ok "models: keep-models (leaving)"
-    return 0
-  fi
-
-  if [ "${PURGE_MODELS_MODE}" = "yes" ]; then
-    rm -f "${model_path}"
-    ok "model: removed (forced purge)"
-    return 0
-  fi
-
-  if [ "${FORCE}" -eq 1 ]; then
-    rm -f "${model_path}"
-    ok "model: removed (--force)"
-    return 0
-  fi
-
-  if [ -z "${model_sha}" ]; then
-    die "model: manifest sha missing (refusing to delete)"
-  fi
-
-  if [ ! -f "${model_path}" ]; then
-    warn "model: not a regular file; leaving in place"
-    return 0
-  fi
-
-  local got
-  got="$(sha256 "${model_path}")"
-  if [ "${got}" != "${model_sha}" ]; then
-    warn "model: sha mismatch; leaving in place"
-    warn "expected: ${model_sha}"
-    warn "got:      ${got}"
-    warn "path:     ${model_path}"
-    return 0
-  fi
-
-  rm -f "${model_path}"
-  ok "model: removed"
-}
-
 prune_empty_dirs() {
   local dir="$1"
   [ -d "${dir}" ] || return 0
   rmdir "${dir}" 2>/dev/null || true
 }
 
-workspace_matches_manifest_or_heuristic() {
-  local workspace="$1" expected_url="$2"
-
+workspace_looks_owned() {
+  local workspace="$1"
   [ -d "${workspace}/.git" ] || return 1
   command -v git >/dev/null 2>&1 || return 1
-
-  if [ -n "${expected_url}" ]; then
-    local url
-    url="$(git -C "${workspace}" config --get remote.origin.url 2>/dev/null || true)"
-    [ "${url}" = "${expected_url}" ] && return 0
-  fi
-
-  local url2
-  url2="$(git -C "${workspace}" config --get remote.origin.url 2>/dev/null || true)"
-  case "${url2}" in
+  local url
+  url="$(git -C "${workspace}" config --get remote.origin.url 2>/dev/null || true)"
+  case "${url}" in
     *github.com/ggml-org/whisper.cpp.git|*github.com:ggml-org/whisper.cpp.git) return 0 ;;
     *github.com/ggml-org/whisper.cpp|*github.com:ggml-org/whisper.cpp) return 0 ;;
     *) return 1 ;;
@@ -305,32 +225,20 @@ remove_workspace_auto_safe() {
     return 0
   fi
 
-  local ws ws_expected_url
-  ws="$(mget workspace "${MANIFEST}")"
-  ws_expected_url="$(mget engine_repo_url "${MANIFEST}")"
-
-  if [ -z "${ws}" ]; then
-    ws="${DEFAULT_WORKSPACE}"
-  fi
-
+  local ws
+  ws="${DEFAULT_WORKSPACE}"
   if [ ! -d "${ws}" ]; then
     ok "workspace not present (skipping)"
     return 0
   fi
 
-  if [ "${PURGE_WORKSPACE_MODE}" = "yes" ]; then
+  if [ "${PURGE_WORKSPACE_MODE}" = "yes" ] || [ "${FORCE}" -eq 1 ]; then
     rm -rf "${ws}"
-    ok "workspace removed (forced purge)"
+    ok "workspace removed"
     return 0
   fi
 
-  if [ "${FORCE}" -eq 1 ]; then
-    rm -rf "${ws}"
-    ok "workspace removed (--force)"
-    return 0
-  fi
-
-  if workspace_matches_manifest_or_heuristic "${ws}" "${ws_expected_url}"; then
+  if workspace_looks_owned "${ws}"; then
     rm -rf "${ws}"
     ok "workspace removed (auto-safe)"
   else
@@ -341,58 +249,76 @@ remove_workspace_auto_safe() {
 
 main() {
   trap on_err ERR
+
   parse_args "$@"
   log_setup
   set_paths
+
   print_plan
   confirm_plan
-
   require_manifest_or_force
 
   step "read manifest"
-  local engine_cli_path engine_cli_sha engine_stream_path engine_stream_sha toggle_path toggle_sha env_path env_sha model_path model_sha
+  local engine_cli_path="" engine_cli_sha=""
+  local toggle_path="" toggle_sha=""
+  local contract_path="" contract_sha=""
+  local models_dir=""
+  local -a model_paths=()
+  local -a model_shas=()
 
-  resolve_manifest_paths "engine_cli_path" "${BIN_DIR}/whisper-cli" engine_cli_path
-  engine_cli_sha="$(mget engine_cli_sha256 "${MANIFEST}")"
+  local line key val
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    val="${line#*=}"
+    case "$key" in
+      engine_cli_path) engine_cli_path="$val" ;;
+      engine_cli_sha256) engine_cli_sha="$val" ;;
+      toggle_path) toggle_path="$val" ;;
+      toggle_sha256) toggle_sha="$val" ;;
+      contract_path) contract_path="$val" ;;
+      contract_sha256) contract_sha="$val" ;;
+      models_dir) models_dir="$val" ;;
+      model_path) model_paths+=("$val") ;;
+      model_sha256) model_shas+=("$val") ;;
+    esac
+  done < "${MANIFEST_FILE}"
 
-  resolve_manifest_paths "engine_stream_path" "${BIN_DIR}/whisper-stream" engine_stream_path
-  engine_stream_sha="$(mget engine_stream_sha256 "${MANIFEST}")"
-
-  resolve_manifest_paths "toggle_path" "${BIN_DIR}/asryx" toggle_path
-  toggle_sha="$(mget toggle_sha256 "${MANIFEST}")"
-
-  resolve_manifest_paths "env_path" "${ENV_FILE}" env_path
-  env_sha="$(mget env_sha256 "${MANIFEST}")"
-
-  model_path="$(mget model_path "${MANIFEST}")"
-  model_sha="$(mget model_sha256 "${MANIFEST}")"
+  [ -n "${engine_cli_path}" ] || engine_cli_path="${BIN_DIR}/whisper-cli"
+  [ -n "${toggle_path}" ] || toggle_path="${BIN_DIR}/asryx"
+  [ -n "${contract_path}" ] || contract_path="${CONTRACT_FILE}"
+  [ -n "${models_dir}" ] || models_dir="${MODELS_DIR}"
 
   step "remove (bin)"
   remove_file_if_matches_manifest "${engine_cli_path}" "${engine_cli_sha}" "whisper-cli"
-
-  if [ -n "${engine_stream_path}" ]; then
-    remove_file_if_matches_manifest "${engine_stream_path}" "${engine_stream_sha}" "whisper-stream"
-  else
-    ok "whisper-stream: not recorded (skipping)"
-  fi
-
   remove_file_if_matches_manifest "${toggle_path}" "${toggle_sha}" "asryx"
 
-  step "remove (env)"
-  remove_file_if_matches_manifest "${env_path}" "${env_sha}" "asryx.env"
+  step "remove (contract)"
+  remove_file_if_matches_manifest "${contract_path}" "${contract_sha}" "asryx internal contract"
 
   step "remove (models)"
-  remove_model_auto_safe "${model_path}" "${model_sha}"
-
-  step "remove (manifest)"
-  if [ -f "${MANIFEST}" ]; then
-    rm -f "${MANIFEST}"
-    ok "removed manifest"
+  if [ "${PURGE_MODELS_MODE}" = "no" ]; then
+    ok "models: keep-models (leaving)"
+  else
+    local i p s
+    for i in "${!model_paths[@]}"; do
+      p="${model_paths[$i]}"
+      s=""
+      if [ "$i" -lt "${#model_shas[@]}" ]; then
+        s="${model_shas[$i]}"
+      fi
+      if [ -n "$p" ]; then
+        remove_file_if_matches_manifest "$p" "$s" "model"
+      fi
+    done
   fi
 
-  prune_empty_dirs "${MODELS_DIR}"
+  step "remove (manifest)"
+  rm -f "${MANIFEST_FILE}" 2>/dev/null || true
+  ok "removed manifest"
+
+  prune_empty_dirs "${models_dir}"
   prune_empty_dirs "${SHARE_DIR}"
-  prune_empty_dirs "${PREFIX}/share"
 
   remove_workspace_auto_safe
 
