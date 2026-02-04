@@ -77,17 +77,8 @@ If it looks right, confirm and proceed. If not, abort.
 
 That’s it.
 
-> [!TIP]
-> Pass `--yes` / `-y` if you want to bypass the confirmation prompt.
+Pass `--yes` / `-y` if you want to bypass the confirmation prompt.
 
-<details>
-<summary><strong>You should see something like this</strong></summary>
-
-<br/>
-
-<img width="963" height="1080" alt="image" src="https://github.com/user-attachments/assets/e4bbf937-687f-4ba1-bf7d-f862a1868744" />
-
-</details>
 
 > [!NOTE]
 > `asryx` installs into `~/.local/bin`. If `asryx` is “command not found”, ensure `~/.local/bin` is on your `PATH`, or run it as `~/.local/bin/asryx`.
