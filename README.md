@@ -32,7 +32,7 @@ It builds [whisper.cpp](https://github.com/ggml-org/whisper.cpp) from source on 
 
 The engine is a single native binary that runs directly on your CPU and uses SIMD vector instructions (AVX, AVX2, FMA, etc. when available) for fast matrix math: tight, low-level numerical code compiled specifically for your machine, not a framework sitting on top of an interpreter.
 
-And since whisper.cpp is dependency-minimal by design, if you can compile standard C++ code, you can build it. The installer handles the entire process: cloning a pinned, known-good commit, compiling a release build, and installing the resulting binaries with an atomic swap so you never end up with a half-written engine binary.
+And since whisper.cpp is dependency-minimal by design, if you can compile standard C++ code, you can build it. The installer handles the entire process: cloning a pinned commit, compiling a release build, and installing the resulting binaries with an atomic swap so you never end up with a half-written engine binary.
 
 You never touch build flags, copy commands from GitHub issues, or debug toolchains. The complexity exists, but it’s sealed behind the installer so you don’t have to think about it.
 
@@ -79,7 +79,6 @@ That’s it.
 
 Pass `--yes` / `-y` if you want to bypass the confirmation prompt.
 
-
 > [!NOTE]
 > `asryx` installs into `~/.local/bin`. If `asryx` is “command not found”, ensure `~/.local/bin` is on your `PATH`, or run it as `~/.local/bin/asryx`.
 
@@ -88,7 +87,7 @@ Pass `--yes` / `-y` if you want to bypass the confirmation prompt.
 
 <br/>
 
-Pick a different model:
+Pick a different model at install time:
 
 ```sh
 bash ./package/install --model tiny.en
@@ -98,7 +97,7 @@ bash ./package/install --model tiny.en
 * **base.en / base**: ~148 MB. Good balance of speed and accuracy for basic tasks.
 * **small.en / small**: ~488 MB. Noticeable accuracy jump; higher memory use.
 * **medium.en / medium**: ~1.53 GB. High accuracy, significantly slower. Best for complex vocabulary.
-* **large-v1 / large-v2 / large-v3**: ~2.9–3.1 GB. State-of-the-art accuracy. Heavy CPU and memory demand.
+* **large-v1 / large-v2 / large-v3**: ~2.9 to 3.1 GB. State-of-the-art accuracy. Heavy CPU and memory demand.
 * **large-v3-turbo**: ~1.5 GB. Distilled Large-v3. Near-large accuracy with substantially faster inference.
 
 > Models ending in `.en` are optimized for **English only**. Standard names (e.g., `small`) are multilingual.
@@ -110,9 +109,9 @@ bash ./package/install --model tiny.en
 
 <br/>
 
-It builds the engine from source on your machine.
+It builds the engine from source on your machine as discussed.
 
-It clones `whisper.cpp`, hard-checks out a pinned commit, builds a release engine, then installs the resulting binaries. Engine binary install is atomic: it stages into a temporary directory, then swaps into place so you never end up with a half-written binary if something goes wrong mid-copy.
+Engine binary install is atomic: it stages into a temporary directory, then swaps into place so you never end up with a half-written binary if something goes wrong mid-copy.
 
 It then downloads the ggml model, installs the toggle script, writes an env contract file, and writes an uninstall manifest containing file paths and SHA256 hashes.
 
@@ -154,46 +153,38 @@ If you’re not on Hyprland, bind it anywhere else. It’s just a command.
 > [!NOTE]
 > It **refuses** to run if the installer **contract** is **missing** or **broken**.
 
+
 <details>
-<summary><strong>Overrides (no reinstall)</strong></summary>
+<summary><strong>Switching models</strong></summary>
 
 <br/>
 
-The installer writes a machine-owned contract at:
+First install the model.
+
+```bash
+bash ./package/install --model large-v3-turbo --yes
+```
+
+Then update the model inside `~/.asryx.env`.
+
+```bash
+ASRYX_MODEL=base.en
+```
+
+If you see an error like:
 
 ```text
-~/.local/share/asryx/asryx.env
+[err] model missing: ~/.local/share/asryx/models/ggml-large-v3-turbo.bin
 ```
 
-Do not edit that file.
+It means your active `ASRYX_MODEL` is pointing to a model that is not installed at `~/.local/share/asryx/models/`.
 
-Instead, create:
-
-```text
-~/.asryx.env
-```
-
-Supported keys:
+Fix it but letting it know.
 
 ```sh
-ASRYX_MODEL=tiny.en
-ASRYX_LANG=en
-ASRYX_THREADS=8
+printf 'ASRYX_MODEL=base.en\n' > ~/.asryx.env
+asryx
 ```
-
-You can also override the runtime directory used for ephemeral payload files:
-
-```sh
-ASRYX_RUNTIME_DIR=/tmp
-```
-
-Notes:
-
-* `ASRYX_MODEL` can be a slug (`tiny.en`) or a path to a `.bin` file.
-* `ASRYX_THREADS` defaults to `nproc`.
-* If you use an `.en` model and don’t set `ASRYX_LANG`, it defaults to `en`.
-
-> Priority: CLI env > ~/.asryx.env > ~/.local/share/asryx/asryx.env
 
 </details>
 

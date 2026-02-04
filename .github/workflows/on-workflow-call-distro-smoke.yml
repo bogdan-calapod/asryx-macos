@@ -44,8 +44,13 @@ jobs:
           #   image: archlinux:latest
 
     name: ${{ matrix.id }}
+
     container:
       image: ${{ matrix.image }}
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
