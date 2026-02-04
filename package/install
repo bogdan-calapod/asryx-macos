@@ -485,12 +485,6 @@ build_release() {
   local cli="${BUILD}/bin/whisper-cli"
   [ -x "${cli}" ] || die "build did not produce whisper-cli at ${cli}"
   ok "built whisper-cli ($(dur "${t0}" "${t1}"))"
-
-  if [ -x "${BUILD}/bin/whisper-stream" ]; then
-    ok "built whisper-stream"
-  else
-    warn "whisper-stream not built (ok)"
-  fi
 }
 
 install_binaries_atomic() {
@@ -514,43 +508,40 @@ install_binaries_atomic() {
   rm -rf "${stage}" >>"${LOG_FILE}" 2>&1 || true
   rm -f "${cli_bak}" >>"${LOG_FILE}" 2>&1 || true
   ok "installed: ${cli_dst}"
-
-  if [ -x "${BUILD}/bin/whisper-stream" ]; then
-    local stream_src="${BUILD}/bin/whisper-stream"
-    local stream_dst="${BIN_DIR}/whisper-stream"
-    local stream_bak="${BIN_DIR}/.whisper-stream.bak.${timestamp}"
-    local stage2="${BIN_DIR}/.${APP_ID}.stage2.${timestamp}"
-    mkdir -p "${stage2}"
-    install -m 0755 "${stream_src}" "${stage2}/whisper-stream"
-    if [ -f "${stream_dst}" ] || [ -L "${stream_dst}" ]; then
-      mv -f "${stream_dst}" "${stream_bak}" >>"${LOG_FILE}" 2>&1 || true
-    fi
-    mv -f "${stage2}/whisper-stream" "${stream_dst}"
-    rm -rf "${stage2}" >>"${LOG_FILE}" 2>&1 || true
-    rm -f "${stream_bak}" >>"${LOG_FILE}" 2>&1 || true
-    ok "installed: ${stream_dst}"
-  fi
 }
 
 download_model() {
   step "install (model)"
   mkdir -p "${MODELS_DIR}"
-  local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
 
-  if [ -s "${model_file}" ]; then
-    ok "model already present: $(basename "${model_file}")"
-    return 0
-  fi
+  local canonical="${MODELS_DIR}/ggml-model.bin"
+  local tmp="${MODELS_DIR}/.ggml-model.${timestamp}.tmp"
 
   local dl="${ROOT}/models/download-ggml-model.sh"
   [ -f "${dl}" ] || die "missing model downloader: ${dl}"
 
-  info "downloading: ${MODEL_SLUG}"
-  ( cd "${ROOT}" && bash "./models/download-ggml-model.sh" "${MODEL_SLUG}" ) >>"${LOG_FILE}" 2>&1
   local downloaded="${ROOT}/models/ggml-${MODEL_SLUG}.bin"
+
+  if [ ! -s "${downloaded}" ]; then
+    info "downloading: ${MODEL_SLUG}"
+    (
+      cd "${ROOT}"
+      bash "./models/download-ggml-model.sh" "${MODEL_SLUG}"
+    ) 2>&1 | tee -a "${LOG_FILE}"
+  else
+    ok "cached download present: $(basename "${downloaded}")"
+  fi
+
   [ -s "${downloaded}" ] || die "model download failed: ${downloaded}"
-  install -m 0644 "${downloaded}" "${model_file}"
-  ok "model installed: $(basename "${model_file}")"
+
+  install -m 0644 "${downloaded}" "${tmp}"
+  mv -f "${tmp}" "${canonical}"
+
+  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-current.bin"
+  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-base.en.bin"
+  ln -sfn "ggml-model.bin" "${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+
+  ok "model active: $(basename "${canonical}") (slug=${MODEL_SLUG})"
 }
 
 install_toggle() {
@@ -570,7 +561,7 @@ write_contract() {
   mkdir -p "${SHARE_DIR}"
 
   local engine="${BIN_DIR}/whisper-cli"
-  local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+  local model="${MODELS_DIR}/ggml-model.bin"
 
   {
     echo "ASRYX_ENGINE=${engine}"
@@ -585,9 +576,9 @@ write_manifest() {
   mkdir -p "${SHARE_DIR}"
 
   local engine="${BIN_DIR}/whisper-cli"
-  local stream="${BIN_DIR}/whisper-stream"
   local toggle="${BIN_DIR}/asryx"
-  local model="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
+  local model="${MODELS_DIR}/ggml-model.bin"
+  local model_link="${MODELS_DIR}/ggml-current.bin"
 
   {
     echo "app_id=${APP_ID}"
@@ -606,20 +597,13 @@ write_manifest() {
     echo "engine_cli_path=${engine}"
     echo "engine_cli_sha256=$(sha256 "${engine}")"
 
-    if [ -x "${stream}" ]; then
-      echo "engine_stream_path=${stream}"
-      echo "engine_stream_sha256=$(sha256 "${stream}")"
-    else
-      echo "engine_stream_path="
-      echo "engine_stream_sha256="
-    fi
-
     echo "toggle_path=${toggle}"
     echo "toggle_sha256=$(sha256 "${toggle}")"
 
     echo "model_slug=${MODEL_SLUG}"
     echo "model_path=${model}"
     echo "model_sha256=$(sha256 "${model}")"
+    echo "model_link_current=${model_link}"
   } > "${MANIFEST}"
 
   ok "wrote: ${MANIFEST}"
@@ -638,8 +622,7 @@ verify_install() {
   (has_cmd wl-copy || has_cmd xclip) || die "missing runtime tool: wl-copy/xclip"
   ok "runtime tools ok"
 
-  local model_file="${MODELS_DIR}/ggml-${MODEL_SLUG}.bin"
-  [ -s "${model_file}" ] || die "missing model: ${model_file}"
+  [ -s "${MODELS_DIR}/ggml-model.bin" ] || die "missing model: ${MODELS_DIR}/ggml-model.bin"
   ok "model ok"
 
   _emit ""
