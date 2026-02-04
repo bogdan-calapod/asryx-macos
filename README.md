@@ -79,7 +79,7 @@ That’s it.
 
 Pass `--yes` / `-y` if you want to bypass the confirmation prompt.
 
-> [!NOTE]
+> [!IMPORTANT]
 > `asryx` installs into `~/.local/bin`. If `asryx` is “command not found”, ensure `~/.local/bin` is on your `PATH`, or run it as `~/.local/bin/asryx`.
 
 <details>
@@ -124,9 +124,6 @@ Nothing in your shell config is modified. No compositor config is modified. No k
 ## Supported distros
 
 Supported (and [CI](./.github/workflows/) tested) on **Debian** based systems (Debian, Ubuntu, Mint and Pop! OS), **Arch**, and **Fedora**.
-
-> [!NOTE]
-> asryx as a standalone tool is an extension of [OSyx](https://github.com/rccyx/osyx).
 
 ## Usage
 

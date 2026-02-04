@@ -44,18 +44,14 @@ jobs:
           #   image: archlinux:latest
 
     name: ${{ matrix.id }}
-
     container:
       image: ${{ matrix.image }}
-
-    defaults:
-      run:
-        shell: bash
 
     steps:
       - uses: actions/checkout@v4
 
       - name: base deps (sudo + git)
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -79,6 +75,7 @@ jobs:
           fi
 
       - name: create ci user (passwordless sudo)
+        shell: bash
         run: |
           set -euo pipefail
           useradd -m -s /bin/bash ci || true
@@ -86,11 +83,13 @@ jobs:
           chmod 0440 /etc/sudoers.d/ci
 
       - name: install
+        shell: bash
         run: |
           set -euo pipefail
           sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/install --yes"
 
       - name: verify install
+        shell: bash
         run: |
           set -euo pipefail
           sudo -u ci -H bash -lc "set -euo pipefail
@@ -102,11 +101,13 @@ jobs:
           "
 
       - name: uninstall
+        shell: bash
         run: |
           set -euo pipefail
           sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/uninstall --yes"
 
       - name: verify uninstall
+        shell: bash
         run: |
           set -euo pipefail
           sudo -u ci -H bash -lc "set -euo pipefail
