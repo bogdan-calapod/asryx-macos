@@ -2,9 +2,8 @@
 
 # asryx
 
-Effortlessly turn your **voice** into **text**, **offline**, on Linux.
+Effortlessly turn your **voice** into **text**, **offline**, on Linux, via a simple **toggle**.
 
-You get **one toggle** command and you **wire** it to **whatever** control **surface** you want.
 
 </div>
 
@@ -12,7 +11,7 @@ You get **one toggle** command and you **wire** it to **whatever** control **sur
 
 ## How it works
 
-You simply **run** the installer, **confirm** the **plan**, and it **just works**. All you have to do after is:
+You simply **run** the installer, **confirm** the **plan**, wait for build, and... it **just works**. All you have to do after is:
 
 You **run** it/keybind **once**: it records.
 
@@ -151,37 +150,77 @@ If you’re not on Hyprland, bind it anywhere else. It’s just a command.
 > It **refuses** to run if the installer **contract** is **missing** or **broken**.
 
 
+## Configs
+
+
+`asryx` behavior is defined by environment variables. It loads a base contract from `~/.local/share/asryx/asryx.env` and looks for user overrides in `~/.asryx.env`.
+
+
 <details>
-<summary><strong>Switching models</strong></summary>
+<summary><strong>Options</strong></summary>
 
-<br/>
 
-First install the model.
+### `ASRYX_MODEL`
 
-```bash
-bash ./package/install --model large-v3-turbo --yes
-```
+Determines the balance between accuracy and speed.
 
-Then update the model inside `~/.asryx.env`.
-
-```bash
-ASRYX_MODEL=base.en
-```
-
-If you see an error like:
+* **Format**: Slug (e.g., `small.en`), filename, or absolute path.
+* **Default**: `base.en`.
+* **Behavior**: Points the engine to the specific weights file. If you set a model that hasn't been downloaded, you will see an error:
 
 ```text
 [err] model missing: ~/.local/share/asryx/models/ggml-large-v3-turbo.bin
 ```
 
-It means your active `ASRYX_MODEL` is pointing to a model that is not installed at `~/.local/share/asryx/models/`.
+This means your active `ASRYX_MODEL` is pointing to a file that does not exist in the model store. You can fix it by pointing to an installed model:
 
-Fix it but letting it know.
-
-```sh
-printf 'ASRYX_MODEL=base.en\n' > ~/.asryx.env
-asryx
+```bash
+printf 'ASRYX_MODEL=large-v3-turbo\n' > ~/.asryx.env
 ```
+
+Or installing it:
+
+```bash
+bash ./package/install --model large-v3-turbo
+```
+
+> If you install the same model again, the result will be cached, it won't re-install it.
+
+
+### `ASRYX_THREADS`
+
+Number of CPU cores dedicated to matrix multiplication.
+
+* **Format**: Integer.
+* **Default**: `nproc` (all available cores).
+* **Behavior**: Determines how fast the math happens. While `nproc` is fastest, it may cause temporary system stutter. Manually setting this to a lower number (e.g., `4`) preserves system responsiveness during transcription.
+
+### `ASRYX_LANG`
+
+Explicit language hint for the engine.
+
+* **Format**: 2-letter ISO code (`en`, `es`, `fr`, etc.).
+* **Default**: `en` (when using `.en` models).
+* **Behavior**: Skips the language identification overhead, since Whisper spends some time trying to decipher your accent/language, even if it's set to `en` or `es` etc. Therefore, by forcing a language, you prevent the engine from guessing and eliminate some hallucinations where ambient noise is misinterpreted as a foreign language.
+
+</details>
+
+<details>
+<summary><strong>Applying changes</strong></summary>
+
+<br/>
+
+Simply write your overrides to `~/.asryx.env`.
+
+Example for a high-accuracy, resource-capped English setup:
+
+```bash
+ASRYX_MODEL=medium.en
+ASRYX_THREADS=4
+ASRYX_LANG=en
+```
+
+The next time you run `asryx`, it will pick up these variables and behave accordingly.
 
 </details>
 
