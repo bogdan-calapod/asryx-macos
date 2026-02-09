@@ -1,21 +1,34 @@
 BasedOnStyle: LLVM
+
 Language: Cpp
 Standard: c++20
+
+# hard wrap target for readable diffs.
 ColumnLimit: 100
+
+# two-space project indentation. no tabs in c++ files.
 IndentWidth: 2
 ContinuationIndentWidth: 4
 TabWidth: 2
 UseTab: Never
+
+# keep pointers/references attached to the type: std::string* p, const T& v.
 DerivePointerAlignment: false
 PointerAlignment: Left
 ReferenceAlignment: Left
+
+# align wrapped calls and expressions instead of creating ragged continuation blocks.
 AlignAfterOpenBracket: Align
 AlignArrayOfStructures: Left
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 AlignOperands: Align
+
+# avoid compressed function calls/declarations when they wrap.
 AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
+
+# short constructs stay expanded, except empty functions and inline lambdas.
 AllowShortBlocksOnASingleLine: Never
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortEnumsOnASingleLine: false
@@ -23,10 +36,11 @@ AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLambdasOnASingleLine: Inline
 AllowShortLoopsOnASingleLine: false
+
 AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: true
-BinPackArguments: false
-BinPackParameters: false
+
+# custom brace layout keeps functions/classes visually heavy without indenting namespace bodies.
 BreakBeforeBraces: Custom
 BraceWrapping:
   AfterCaseLabel: true
@@ -40,27 +54,40 @@ BraceWrapping:
   BeforeCatch: true
   BeforeElse: true
   IndentBraces: false
+
+# constructor initializer lists become one item per line when they wrap.
 BreakConstructorInitializers: BeforeComma
-CompactNamespaces: false
 ConstructorInitializerAllOnOneLineOrOnePerLine: false
+PackConstructorInitializers: Never
+
+CompactNamespaces: false
 Cpp11BracedListStyle: true
 FixNamespaceComments: true
+
+# local project includes first, system includes second.
 IncludeBlocks: Regroup
 IncludeCategories:
   - Regex: '^".*"'
     Priority: 1
-  - Regex: '^<.*>$'
+  - Regex: "^<.*>$"
     Priority: 2
+
 IndentCaseBlocks: false
 IndentCaseLabels: true
 IndentPPDirectives: AfterHash
+
+# keep files tight without destroying intentional paragraph breaks.
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
+
 NamespaceIndentation: None
-PackConstructorInitializers: Never
+
 ReflowComments: true
 SortIncludes: CaseSensitive
 SortUsingDeclarations: true
+
+# `if (` not `if(`. function calls stay tight.
 SpaceBeforeParens: ControlStatements
+
 SpacesInAngles: Never
 SpacesInContainerLiterals: false
