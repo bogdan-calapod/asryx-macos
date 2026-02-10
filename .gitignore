@@ -1,0 +1,33 @@
+# build output
+build/
+out/
+dist/
+release/
+.cache/
+.cmake/
+.mypy_cache/
+compile_commands.json
+
+# local editor state
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# native artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# generated packages
+*.tar.gz
+*.zip
+
