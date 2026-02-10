@@ -31,3 +31,9 @@ compile_commands.json
 *.tar.gz
 *.zip
 
+# local presets
+CMakeUserPresets.json
+
+# runtime crumbs from local testing
+.asryx-test-home/
+.asryx-test-runtime/
