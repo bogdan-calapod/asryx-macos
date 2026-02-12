@@ -1,0 +1,18 @@
+option(ASRYX_ENABLE_LTO "Enable link-time optimization for optimized builds" OFF)
+
+function(asryx_enable_hardening target)
+  if(ASRYX_ENABLE_LTO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT asryx_ipo_supported OUTPUT asryx_ipo_error)
+    if(asryx_ipo_supported)
+      set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else()
+      message(WARNING "LTO unavailable: ${asryx_ipo_error}")
+    endif()
+  endif()
+
+  if(UNIX AND NOT APPLE)
+    target_compile_options(${target} PRIVATE -fstack-protector-strong -D_FORTIFY_SOURCE=2)
+    target_link_options(${target} PRIVATE -Wl,-z,relro -Wl,-z,now)
+  endif()
+endfunction()
