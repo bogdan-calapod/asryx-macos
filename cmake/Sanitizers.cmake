@@ -11,12 +11,14 @@ function(asryx_enable_sanitizers target)
   endif()
 
   if(ASRYX_SANITIZER STREQUAL "address")
+    # catches memory misuse such as buffer overflows and use-after-free.
     target_compile_options(${target} PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address)
     return()
   endif()
 
   if(ASRYX_SANITIZER STREQUAL "undefined")
+    # catches undefined behavior that may compile but still corrupt program semantics.
     target_compile_options(${target} PRIVATE -fsanitize=undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=undefined)
     return()
