@@ -1,0 +1,76 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  cppcoreguidelines-*,
+  hicpp-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
+  -hicpp-avoid-c-arrays,
+  -hicpp-braces-around-statements,
+  -hicpp-no-array-decay,
+  -hicpp-vararg,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -modernize-use-ranges,
+  -modernize-use-trailing-return-type,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-magic-numbers,
+  -readability-uppercase-literal-suffix,
+  -readability-use-anyofallof
+
+# lint warnings fail the gate.
+WarningsAsErrors: "*"
+
+# lint only project code and tests, not system headers.
+HeaderFilterRegex: "^(src|tests)/.*"
+
+# use .clang-format for any tidy-driven fixes.
+FormatStyle: file
+
+CheckOptions:
+  # kept as policy values even while the matching checks are disabled.
+  - key: readability-function-cognitive-complexity.Threshold
+    value: "10"
+  - key: readability-function-size.LineThreshold
+    value: "50"
+  - key: readability-function-size.ParameterThreshold
+    value: "4"
+  - key: readability-function-size.NestingThreshold
+    value: "3"
+  - key: readability-function-size.StatementThreshold
+    value: "30"
+
+  - key: readability-else-after-return.WarnOnUnfixable
+    value: "true"
+
+  # treat legacy NULL as nullptr migration input.
+  - key: modernize-use-nullptr.NullMacros
+    value: "NULL"
+
+  # catch useless moves even when the type is cheap to copy.
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: "true"
+
+  # require argument comments to match parameter names exactly when used.
+  - key: bugprone-argument-comment.StrictMode
+    value: "true"
+
+  # allow classes with only an explicitly defaulted destructor.
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: "true"
