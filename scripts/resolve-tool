@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+tool="${1:?tool name required}"
+shift || true
+
+if command -v "${tool}" >/dev/null 2>&1; then
+  command -v "${tool}"
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+for local_bin in \
+  "${repo_root}/.cache/dev-tools/usr/bin" \
+  "${repo_root}/.cache/dev-tools/usr/lib/llvm-21/bin"; do
+  if [[ -x "${local_bin}/${tool}" ]]; then
+    printf '%s\n' "${local_bin}/${tool}"
+    exit 0
+  fi
+done
+
+for version in 19 18 17 16 15 14; do
+  candidate="${tool}-${version}"
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    command -v "${candidate}"
+    exit 0
+  fi
+  for local_bin in \
+    "${repo_root}/.cache/dev-tools/usr/bin" \
+    "${repo_root}/.cache/dev-tools/usr/lib/llvm-21/bin"; do
+    if [[ -x "${local_bin}/${candidate}" ]]; then
+      printf '%s\n' "${local_bin}/${candidate}"
+      exit 0
+    fi
+  done
+done
+
+printf 'error: required tool not found: %s\n' "${tool}" >&2
+case "${tool}" in
+  clang-format | clang-tidy)
+    printf 'hint: install LLVM tools, for example: sudo apt-get install clang-format clang-tidy\n' >&2
+    ;;
+  cppcheck)
+    printf 'hint: install cppcheck, for example: sudo apt-get install cppcheck\n' >&2
+    ;;
+  shellcheck)
+    printf 'hint: install shellcheck, for example: sudo apt-get install shellcheck\n' >&2
+    ;;
+esac
+exit 127

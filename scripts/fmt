@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+mode="${1:---check}"
+if [[ "${mode}" != "--check" && "${mode}" != "--fix" ]]; then
+  printf 'error: unknown format mode: %s\n' "${mode}" >&2
+  printf 'hint: use --check or --fix\n' >&2
+  exit 2
+fi
+
+clang_format="$(scripts/resolve-tool clang-format)"
+
+mapfile -d '' files < <(
+  find src tests -type f \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \) \
+    -print0
+)
+
+if ((${#files[@]} == 0)); then
+  exit 0
+fi
+
+if [[ "${mode}" == "--fix" ]]; then
+  "${clang_format}" -i "${files[@]}"
+else
+  "${clang_format}" --dry-run --Werror "${files[@]}"
+fi

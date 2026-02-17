@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+build_dir="build/dev"
+compile_commands="${build_dir}/compile_commands.json"
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+if [[ ! -f "${compile_commands}" ]]; then
+  printf 'error: missing compile database: %s\n' "${compile_commands}" >&2
+  printf 'hint: run: just configure\n' >&2
+  exit 2
+fi
+
+if ! grep -Fq "\"file\": \"${repo_root}/" "${compile_commands}"; then
+  printf 'error: stale compile database: %s\n' "${compile_commands}" >&2
+  printf 'hint: remove %s and rerun: just configure\n' "${build_dir}" >&2
+  exit 2
+fi
+
+clang_tidy="$(scripts/resolve-tool clang-tidy)"
+cppcheck="$(scripts/resolve-tool cppcheck)"
+shellcheck_bin="$(scripts/resolve-tool shellcheck)"
+
+python3 scripts/lib/check-line-limits.py
+python3 scripts/lib/check-module-boundaries.py
+python3 scripts/lib/check-owned-paths.py
+python3 scripts/lib/check-version.py
+
+mapfile -d '' files < <(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0)
+if ((${#files[@]} > 0)); then
+  "${clang_tidy}" -p "${build_dir}" "${files[@]}"
+fi
+
+"${cppcheck}" \
+  --enable=all \
+  --error-exitcode=1 \
+  --inline-suppr \
+  --suppress=checkersReport \
+  --suppress=missingInclude \
+  --suppress=normalCheckLevelMaxBranches \
+  --suppressions-list=cppcheck.suppressions \
+  -I . \
+  --project="${compile_commands}"
+
+"${shellcheck_bin}" -x install
