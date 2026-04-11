@@ -65,9 +65,7 @@ pid_t spawn_process_background(const std::vector<std::string>& argv,
     std::vector<std::string> argv_copy = argv;
     std::vector<char*> c_argv;
     c_argv.reserve(argv.size() + 1);
-    std::transform(argv_copy.begin(),
-                   argv_copy.end(),
-                   std::back_inserter(c_argv),
+    std::transform(argv_copy.begin(), argv_copy.end(), std::back_inserter(c_argv),
                    // cppcheck-suppress constParameterReference
                    [](std::string& arg) { return arg.data(); });
     c_argv.push_back(nullptr);
@@ -136,9 +134,7 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
     std::vector<std::string> argv_copy = argv;
     std::vector<char*> c_argv;
     c_argv.reserve(argv.size() + 1);
-    std::transform(argv_copy.begin(),
-                   argv_copy.end(),
-                   std::back_inserter(c_argv),
+    std::transform(argv_copy.begin(), argv_copy.end(), std::back_inserter(c_argv),
                    // cppcheck-suppress constParameterReference
                    [](std::string& arg) { return arg.data(); });
     c_argv.push_back(nullptr);

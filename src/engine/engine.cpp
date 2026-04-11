@@ -39,8 +39,7 @@ bool stop_recording(pid_t pid)
   return true;
 }
 
-bool run_whisper(const std::string& model_path,
-                 const std::string& wav_path,
+bool run_whisper(const std::string& model_path, const std::string& wav_path,
                  const std::string& out_prefix)
 {
   auto whisper_cli_path = platform::get_home_relative_path(".local/bin/whisper-cli");
@@ -49,8 +48,8 @@ bool run_whisper(const std::string& model_path,
                              ". Run the top-level install script.");
   }
 
-  std::vector<std::string> args =
-      {whisper_cli_path.string(), "-m", model_path, "-f", wav_path, "-of", out_prefix, "-otxt"};
+  std::vector<std::string> args = {
+      whisper_cli_path.string(), "-m", model_path, "-f", wav_path, "-of", out_prefix, "-otxt"};
   return platform::run_process_blocking(args);
 }
 
