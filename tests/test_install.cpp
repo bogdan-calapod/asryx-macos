@@ -20,8 +20,7 @@ void run_test_install()
                    "done\n"
                    "printf 'Test transcription.\\n' > \"${out}.txt\"\n";
   }
-  std::filesystem::permissions(whisper_cli_path,
-                               std::filesystem::perms::owner_exec,
+  std::filesystem::permissions(whisper_cli_path, std::filesystem::perms::owner_exec,
                                std::filesystem::perm_options::add);
 
   install::install_app();

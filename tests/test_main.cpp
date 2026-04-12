@@ -50,14 +50,11 @@ int main()
       std::ofstream notify(bin_path / "notify-send");
       notify << "#!/bin/sh\nexit 0\n";
     }
-    std::filesystem::permissions(bin_path / "pw-record",
-                                 std::filesystem::perms::owner_exec,
+    std::filesystem::permissions(bin_path / "pw-record", std::filesystem::perms::owner_exec,
                                  std::filesystem::perm_options::add);
-    std::filesystem::permissions(bin_path / "wl-copy",
-                                 std::filesystem::perms::owner_exec,
+    std::filesystem::permissions(bin_path / "wl-copy", std::filesystem::perms::owner_exec,
                                  std::filesystem::perm_options::add);
-    std::filesystem::permissions(bin_path / "notify-send",
-                                 std::filesystem::perms::owner_exec,
+    std::filesystem::permissions(bin_path / "notify-send", std::filesystem::perms::owner_exec,
                                  std::filesystem::perm_options::add);
 
     setenv("HOME", home_path.c_str(), 1);
