@@ -1,7 +1,12 @@
-#!/usr/bin/env python3
+"""
+This serves on purpose & one purpose only: no one in the codebase is allowed to delete files directly
+except the filesystem abstraction layer
+"""
 from pathlib import Path
 import re
 import sys
+
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PATTERNS = [
