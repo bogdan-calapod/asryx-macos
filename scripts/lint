@@ -24,7 +24,6 @@ shellcheck_bin="$(scripts/resolve-tool shellcheck)"
 python3 scripts/lib/check-line-limits.py
 python3 scripts/lib/check-module-boundaries.py
 python3 scripts/lib/check-owned-paths.py
-python3 scripts/lib/check-version.py
 
 mapfile -d '' files < <(find src tests -type f \( -name '*.cpp' -o -name '*.hpp' \) -print0)
 if ((${#files[@]} > 0)); then

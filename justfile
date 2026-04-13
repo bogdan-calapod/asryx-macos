@@ -25,7 +25,7 @@ alias g := gate
 
 @lint:
 	just configure
-	scripts/check
+	scripts/lint
 
 @sanitize:
 	cmake --fresh --preset asan
