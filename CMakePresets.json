@@ -16,17 +16,9 @@
       }
     },
     {
-      "name": "dev",
+      "name": "release",
       "inherits": "base",
-      "displayName": "Dev",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
-      }
-    },
-    {
-      "name": "optimized",
-      "inherits": "base",
-      "displayName": "Optimized",
+      "displayName": "Release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "ASRYX_ENABLE_LTO": "ON"
@@ -52,15 +44,14 @@
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "optimized", "configurePreset": "optimized" },
+    { "name": "release", "configurePreset": "release" },
     { "name": "asan", "configurePreset": "asan" },
     { "name": "ubsan", "configurePreset": "ubsan" }
   ],
   "testPresets": [
     {
-      "name": "dev",
-      "configurePreset": "dev",
+      "name": "release",
+      "configurePreset": "release",
       "output": { "outputOnFailure": true }
     },
     {

@@ -14,15 +14,18 @@ alias t := test
 
 @test:
 	just build
-	ctest --preset dev
+	ctest --preset release
 
 @lint:
 	just configure
 	scripts/lint
 
+@configure:
+	cmake --fresh --preset release
+
 @build:
-	cmake --fresh --preset dev # configure the build dir
-	cmake --build --preset dev
+	cmake --fresh --preset release
+	cmake --build --preset release
 
 @runtime-safety-check:
 	cmake --fresh --preset asan

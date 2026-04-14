@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-build_dir="build/dev"
+build_dir="build/release"
 compile_commands="${build_dir}/compile_commands.json"
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
