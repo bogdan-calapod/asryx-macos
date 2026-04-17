@@ -20,6 +20,9 @@ alias t := test
 	just configure
 	scripts/lint
 
+@shellcheck:
+	scripts/shellcheck
+
 @configure:
 	cmake --fresh --preset release
 

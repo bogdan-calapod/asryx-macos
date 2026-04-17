@@ -11,6 +11,12 @@
 
 namespace model {
 
+namespace {
+
+constexpr const char* whisper_model_ref = "040510a132f0a9b51d4692b57a6abfd8c9660696";
+
+} // namespace
+
 const std::vector<std::string>& get_supported_models()
 {
   static const std::vector<std::string> models = {"tiny.en",  "tiny",     "base.en",   "base",
@@ -57,8 +63,8 @@ void install_model(const std::string& name)
   std::filesystem::create_directories(dir);
 
   std::cout << "Downloading model " << name << "...\n";
-  std::string url =
-      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-" + name + ".bin";
+  std::string url = std::string("https://huggingface.co/ggerganov/whisper.cpp/resolve/") +
+                    whisper_model_ref + "/ggml-" + name + ".bin";
   bool success = false;
   if (platform::command_exists("curl")) {
     success = platform::run_process_blocking({"curl", "-L", "-f", "-o", path, url});

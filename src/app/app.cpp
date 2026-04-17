@@ -1,6 +1,5 @@
 #include "app/app.hpp"
 
-#include "install/install.hpp"
 #include "model/model.hpp"
 #include "runtime/runtime.hpp"
 
@@ -18,7 +17,6 @@ void print_usage()
       << "Usage:\n"
       << "  asryx                           Toggle recording/transcription\n"
       << "  asryx status                    Print current status (idle, recording, transcribing)\n"
-      << "  asryx uninstall                 Uninstall all asryx components\n"
       << "  asryx --model list              List all available model sizes\n"
       << "  asryx --model install <name>    Install a model\n"
       << "  asryx --model use <name>        Select active model\n"
@@ -38,10 +36,6 @@ int run(const std::vector<std::string>& args)
     if (args.size() == 1) {
       if (args[0] == "status") {
         std::cout << runtime::get_status() << "\n";
-        return 0;
-      }
-      if (args[0] == "uninstall") {
-        install::uninstall_app();
         return 0;
       }
     }

@@ -19,7 +19,6 @@ fi
 
 clang_tidy="$(scripts/resolve-tool clang-tidy)"
 cppcheck="$(scripts/resolve-tool cppcheck)"
-shellcheck_bin="$(scripts/resolve-tool shellcheck)"
 
 python3 scripts/lib/check-line-limits.py
 python3 scripts/lib/check-module-boundaries.py
@@ -40,5 +39,3 @@ fi
   --suppressions-list=cppcheck.suppressions \
   -I . \
   --project="${compile_commands}"
-
-"${shellcheck_bin}" -x install

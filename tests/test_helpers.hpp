@@ -29,7 +29,5 @@
 void run_test_config();
 void run_test_model();
 void run_test_lock();
-void run_test_install();
 void run_test_process();
 void run_test_runtime();
-void run_test_uninstall();
