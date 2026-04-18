@@ -1,9 +1,14 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 alias f := format
+alias fc := format-check
 alias l := lint
 alias b := build
 alias t := test
+alias sc := shellcheck
+alias r := runtime-safety-check
+alias c := clean
+
 
 @format:
 	scripts/fmt --fix
@@ -17,14 +22,11 @@ alias t := test
 	ctest --preset release
 
 @lint:
-	just configure
+	cmake --fresh --preset release
 	scripts/lint
 
 @shellcheck:
 	scripts/shellcheck
-
-@configure:
-	cmake --fresh --preset release
 
 @build:
 	cmake --fresh --preset release
@@ -41,7 +43,3 @@ alias t := test
 
 @clean:
 	rm -rf build .cache .asryx-test-home .asryx-test-runtime
-
-
-@install-dev-deps:
-  scripts/install-dev-deps
