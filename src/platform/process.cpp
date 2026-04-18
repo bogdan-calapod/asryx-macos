@@ -1,11 +1,12 @@
-// src/platform/process.cpp
 #include "platform/process.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <iterator>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -38,10 +39,12 @@ std::vector<char*> build_argv(const std::vector<std::string>& argv)
 {
   std::vector<char*> c_argv;
   c_argv.reserve(argv.size() + 1);
-  for (const auto& arg : argv) {
+
+  std::transform(argv.begin(), argv.end(), std::back_inserter(c_argv), [](const std::string& arg) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    c_argv.push_back(const_cast<char*>(arg.c_str()));
-  }
+    return const_cast<char*>(arg.c_str());
+  });
+
   c_argv.push_back(nullptr);
   return c_argv;
 }
