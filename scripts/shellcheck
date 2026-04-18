@@ -4,10 +4,10 @@ set -Eeuo pipefail
 shellcheck_bin="$(scripts/resolve-tool shellcheck)"
 
 "${shellcheck_bin}" -x \
-  install \
-  uninstall \
+  bootstrap \
   scripts/fmt \
   scripts/install-dev-deps \
   scripts/lint \
-  scripts/lint-shell \
-  scripts/resolve-tool
+  scripts/resolve-tool \
+  scripts/shellcheck \
+  scripts/uninstall

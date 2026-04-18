@@ -18,6 +18,7 @@ file(GLOB_RECURSE ASRYX_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.h
 
 add_executable(asryx ${ASRYX_SOURCES} ${ASRYX_HEADERS})
 target_include_directories(asryx PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_compile_definitions(asryx PRIVATE ASRYX_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 asryx_enable_warnings(asryx)
 asryx_enable_hardening(asryx)

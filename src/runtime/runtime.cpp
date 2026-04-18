@@ -6,6 +6,7 @@
 #include "platform/fs.hpp"
 #include "platform/process.hpp"
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -49,6 +50,7 @@ bool acquire_lock(const std::filesystem::path& runtime_dir)
       return true;
     }
   }
+
   return false;
 }
 
@@ -72,12 +74,92 @@ std::string read_state_file(const std::filesystem::path& runtime_dir)
   if (!std::filesystem::exists(state_file)) {
     return "";
   }
-  std::ifstream sf(state_file);
+
+  std::ifstream file(state_file);
   std::string state;
-  if (sf >> state) {
+  if (file >> state) {
     return state;
   }
+
   return "";
+}
+
+bool has_live_lock(const std::filesystem::path& runtime_dir)
+{
+  pid_t pid = 0;
+  return read_pid_file(lock_dir_for(runtime_dir) / "pid", pid) && platform::is_process_running(pid);
+}
+
+bool has_live_recorder(const std::filesystem::path& runtime_dir, pid_t& pid)
+{
+  return read_pid_file(runtime_dir / "rec.pid", pid) && platform::is_process_running(pid);
+}
+
+std::string trim(std::string value)
+{
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+    value.pop_back();
+  }
+
+  size_t start = 0;
+  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
+    ++start;
+  }
+
+  return value.substr(start);
+}
+
+void write_state(const std::filesystem::path& runtime_dir, const std::string& state)
+{
+  std::ofstream file(runtime_dir / "state");
+  file << state << "\n";
+}
+
+void start_recording(const std::filesystem::path& runtime_dir)
+{
+  clean_stale_payload(runtime_dir);
+
+  auto cfg = config::load_config();
+  auto model_path = model::get_model_path(cfg.model);
+  if (!std::filesystem::exists(model_path)) {
+    throw std::runtime_error("model '" + cfg.model +
+                             "' is not installed. Install it with: asryx --model install " +
+                             cfg.model);
+  }
+
+  auto wav_path = runtime_dir / "rec.wav";
+  auto err_path = runtime_dir / "rec.err";
+  pid_t pid = engine::start_recording(wav_path.string(), err_path.string());
+
+  std::ofstream(runtime_dir / "rec.pid") << pid << "\n";
+  write_state(runtime_dir, "recording");
+  engine::send_notification("recording…");
+}
+
+void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid)
+{
+  write_state(runtime_dir, "transcribing");
+  engine::stop_recording(rec_pid);
+
+  auto cfg = config::load_config();
+  auto model_path = model::get_model_path(cfg.model);
+  auto wav_path = runtime_dir / "rec.wav";
+  auto out_prefix = runtime_dir / "out";
+  auto out_txt = runtime_dir / "out.txt";
+
+  bool success = engine::run_whisper(model_path, wav_path.string(), out_prefix.string());
+  if (success && std::filesystem::exists(out_txt)) {
+    std::ifstream file(out_txt);
+    std::string transcript((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    engine::copy_to_clipboard(trim(transcript));
+    engine::send_notification("copied to clipboard");
+    clean_stale_payload(runtime_dir);
+    return;
+  }
+
+  engine::send_notification("transcription failed");
+  clean_stale_payload(runtime_dir);
 }
 
 } // namespace
@@ -86,16 +168,14 @@ std::string get_status()
 {
   auto runtime_dir = platform::get_runtime_directory();
   auto state = read_state_file(runtime_dir);
-  if (state == "transcribing") {
-    return state;
+
+  pid_t rec_pid = 0;
+  if (has_live_recorder(runtime_dir, rec_pid)) {
+    return "recording";
   }
 
-  auto rec_pid_path = runtime_dir / "rec.pid";
-  pid_t pid = 0;
-  if (read_pid_file(rec_pid_path, pid)) {
-    if (platform::is_process_running(pid)) {
-      return state.empty() ? "recording" : state;
-    }
+  if (state == "transcribing" && has_live_lock(runtime_dir)) {
+    return "transcribing";
   }
 
   return "idle";
@@ -105,91 +185,19 @@ void toggle()
 {
   auto runtime_dir = platform::get_runtime_directory();
   if (!acquire_lock(runtime_dir)) {
-    // Exit quietly if lock is held by concurrent toggle
     return;
   }
 
   try {
-    auto rec_pid_path = runtime_dir / "rec.pid";
-    bool is_recording = false;
     pid_t rec_pid = 0;
-
-    if (read_pid_file(rec_pid_path, rec_pid) && platform::is_process_running(rec_pid)) {
-      is_recording = true;
-    }
-
-    if (!is_recording) {
-      // First call: Start recording
-      clean_stale_payload(runtime_dir);
-
-      auto cfg = config::load_config();
-      auto model_path = model::get_model_path(cfg.model);
-      if (!std::filesystem::exists(model_path)) {
-        std::cerr << "error: model '" << cfg.model
-                  << "' is not installed.\nInstall it with: asryx --model install " << cfg.model
-                  << "\n";
-        release_lock(runtime_dir);
-        std::exit(1);
-      }
-
-      auto wav_path = runtime_dir / "rec.wav";
-      auto err_path = runtime_dir / "rec.err";
-
-      pid_t pid = engine::start_recording(wav_path.string(), err_path.string());
-      {
-        std::ofstream pfile(rec_pid_path);
-        pfile << pid << "\n";
-      }
-      {
-        std::ofstream sfile(runtime_dir / "state");
-        sfile << "recording\n";
-      }
-
-      engine::send_notification("recording…");
-      release_lock(runtime_dir);
+    if (has_live_recorder(runtime_dir, rec_pid)) {
+      stop_and_transcribe(runtime_dir, rec_pid);
     }
     else {
-      // Second call: Stop, Transcribe, Copy, Notify, Clean
-      {
-        std::ofstream sfile(runtime_dir / "state");
-        sfile << "transcribing\n";
-      }
-
-      engine::stop_recording(rec_pid);
-
-      auto cfg = config::load_config();
-      auto model_path = model::get_model_path(cfg.model);
-      auto wav_path = runtime_dir / "rec.wav";
-      auto out_prefix = runtime_dir / "out";
-      auto out_txt = runtime_dir / "out.txt";
-
-      bool success = engine::run_whisper(model_path, wav_path.string(), out_prefix.string());
-      if (success && std::filesystem::exists(out_txt)) {
-        std::ifstream tf(out_txt);
-        std::string transcript((std::istreambuf_iterator<char>(tf)),
-                               std::istreambuf_iterator<char>());
-        // Trim whitespace
-        while (!transcript.empty() && std::isspace(static_cast<unsigned char>(transcript.back()))) {
-          transcript.pop_back();
-        }
-        size_t start = 0;
-        while (start < transcript.size() &&
-               std::isspace(static_cast<unsigned char>(transcript[start])))
-        {
-          start++;
-        }
-        transcript = transcript.substr(start);
-
-        engine::copy_to_clipboard(transcript);
-        engine::send_notification("Copied to clipboard");
-      }
-      else {
-        engine::send_notification("Transcription failed");
-      }
-
-      clean_stale_payload(runtime_dir);
-      release_lock(runtime_dir);
+      start_recording(runtime_dir);
     }
+
+    release_lock(runtime_dir);
   }
   catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";

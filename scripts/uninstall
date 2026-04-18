@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+log() { printf 'asryx uninstall: %s\n' "$*"; }
+die() {
+  printf 'asryx uninstall: error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_home() {
+  [[ -n "${HOME:-}" ]] || die "HOME is not set"
+  [[ "${HOME}" == /* ]] || die "HOME is not an absolute path; refusing to continue: ${HOME}"
+  [[ "${HOME}" != "/" ]] || die "HOME resolved to /; refusing to continue"
+}
+
+require_absolute() {
+  local path="$1"
+  [[ -n "${path}" ]] || die "refusing to delete empty path"
+  [[ "${path}" == /* ]] || die "refusing to delete non-absolute path: ${path}"
+  [[ "${path}" != "/" ]] || die "refusing to delete /"
+  [[ "${path}" != "${HOME}" ]] || die "refusing to delete HOME: ${path}"
+}
+
+remove_one() {
+  local path="$1"
+  require_absolute "${path}"
+
+  if [[ ! -e "${path}" && ! -L "${path}" ]]; then
+    log "already absent: ${path}"
+    return 0
+  fi
+
+  log "removing: ${path}"
+
+  if [[ -d "${path}" && ! -L "${path}" ]]; then
+    rm -rf -- "${path}"
+  else
+    rm -f -- "${path}"
+  fi
+}
+
+main() {
+  require_home
+
+  local runtime_dir="${XDG_RUNTIME_DIR:-}"
+  local runtime_asryx=""
+  if [[ -n "${runtime_dir}" ]]; then
+    runtime_asryx="${runtime_dir}/asryx"
+  fi
+
+  local owned=(
+    "${HOME}/.local/bin/asryx"
+    "${HOME}/.local/bin/whisper-cli"
+    "${HOME}/.local/opt/asryx"
+    "${HOME}/.local/opt/whisper.cpp"
+    "${HOME}/.local/share/asryx"
+    "${HOME}/.cache/asryx"
+    "${HOME}/.asryx.conf"
+  )
+
+  if [[ -n "${runtime_asryx}" ]]; then
+    owned+=("${runtime_asryx}")
+  fi
+
+  for path in "${owned[@]}"; do
+    remove_one "${path}"
+  done
+
+  log "done"
+}
+
+main "$@"

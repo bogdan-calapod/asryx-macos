@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export GIT_TERMINAL_PROMPT=0
+
+repo_url="${ASRYX_REPO_URL:-https://github.com/rccyx/asryx.git}"
+repo_ref="${ASRYX_REF:-main}"
+repo_dir="${ASRYX_REPO_DIR:-${HOME}/.local/opt/asryx}"
+model_name="${ASRYX_MODEL:-base.en}"
+whisper_url="${ASRYX_WHISPER_REPO_URL:-https://github.com/ggerganov/whisper.cpp.git}"
+
+log() {
+  printf 'asryx bootstrap: %s\n' "$*"
+}
+
+die() {
+  printf 'asryx bootstrap: error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_home() {
+  [[ -n "${HOME:-}" ]] || die "HOME is not set"
+  [[ "${HOME}" == /* ]] || die "HOME is not an absolute path; refusing to continue: ${HOME}"
+  [[ "${HOME}" != "/" ]] || die "HOME resolved to /; refusing to continue"
+}
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+ensure_dir() {
+  local dir="$1"
+  mkdir -p "${dir}"
+}
+
+missing_tools() {
+  local missing=()
+
+  for tool in "$@"; do
+    if ! have "${tool}"; then
+      missing+=("${tool}")
+    fi
+  done
+
+  ((${#missing[@]} == 0)) || printf '%s\n' "${missing[@]}"
+}
+
+sudo_prefix() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    return 0
+  fi
+
+  have sudo || die "sudo is required to install missing system packages"
+  printf '%s\n' sudo
+}
+
+install_deps_apt() {
+  local sudo_cmd
+  sudo_cmd="$(sudo_prefix)"
+
+  log "installing missing system packages with apt-get"
+  log "packages: git cmake ninja-build g++ curl ca-certificates"
+
+  if [[ -n "${sudo_cmd}" ]]; then
+    "${sudo_cmd}" apt-get update
+    "${sudo_cmd}" apt-get install -y --no-install-recommends \
+      git cmake ninja-build g++ curl ca-certificates
+  else
+    apt-get update
+    apt-get install -y --no-install-recommends \
+      git cmake ninja-build g++ curl ca-certificates
+  fi
+}
+
+ensure_dependencies() {
+  local missing
+  missing="$(missing_tools git cmake ninja c++ curl sha256sum)"
+
+  if [[ -z "${missing}" ]]; then
+    return 0
+  fi
+
+  log "missing tools:"
+  printf '%s\n' "${missing}" | sed 's/^/  - /'
+
+  if have apt-get; then
+    install_deps_apt
+  else
+    die "install these tools and rerun: git cmake ninja c++ curl sha256sum"
+  fi
+}
+
+is_asryx_repo() {
+  local dir="$1"
+
+  [[ -d "${dir}/.git" ]] || return 1
+  [[ -f "${dir}/CMakeLists.txt" ]] || return 1
+  [[ -f "${dir}/CMakePresets.json" ]] || return 1
+  [[ -f "${dir}/versions/whisper-cpp-sha" ]] || return 1
+  [[ -d "${dir}/src" ]] || return 1
+}
+
+current_asryx_repo() {
+  local root=""
+
+  root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [[ -n "${root}" ]] || return 1
+
+  is_asryx_repo "${root}" || return 1
+  printf '%s\n' "${root}"
+}
+
+sync_asryx_repo() {
+  local url="$1"
+  local ref="$2"
+  local dir="$3"
+
+  if [[ -d "${dir}/.git" ]]; then
+    log "updating asryx at ${dir}"
+    git -C "${dir}" fetch --depth 1 origin "${ref}"
+    git -C "${dir}" checkout -B "${ref}" FETCH_HEAD
+    git -C "${dir}" fsck --no-progress
+    return 0
+  fi
+
+  if [[ -e "${dir}" ]]; then
+    die "${dir} exists but is not a git checkout"
+  fi
+
+  log "cloning asryx"
+  log "from: ${url}"
+  log "to:   ${dir}"
+
+  git clone --depth 1 --branch "${ref}" "${url}" "${dir}"
+  git -C "${dir}" fsck --no-progress
+}
+
+resolve_source() {
+  local current_root=""
+
+  current_root="$(current_asryx_repo || true)"
+  if [[ -n "${current_root}" ]]; then
+    repo_dir="${current_root}"
+    log "using current asryx checkout: ${repo_dir}"
+    return 0
+  fi
+
+  sync_asryx_repo "${repo_url}" "${repo_ref}" "${repo_dir}"
+}
+
+read_whisper_sha() {
+  local path="${repo_dir}/versions/whisper-cpp-sha"
+
+  [[ -s "${path}" ]] || die "missing whisper.cpp pin: ${path}"
+  tr -d '[:space:]' <"${path}"
+}
+
+build_asryx() {
+  log "configuring asryx release build in ${repo_dir}/build/release"
+  cmake --fresh --preset release -S "${repo_dir}"
+
+  log "building asryx"
+  cmake --build "${repo_dir}/build/release" --target asryx
+}
+
+install_asryx_binary() {
+  local src_bin="${repo_dir}/build/release/asryx"
+  local dst_bin="${HOME}/.local/bin/asryx"
+
+  [[ -x "${src_bin}" ]] || die "expected built binary at ${src_bin}"
+
+  ensure_dir "${HOME}/.local/bin"
+
+  log "installing asryx to ${dst_bin}"
+  install -m 0755 "${src_bin}" "${dst_bin}"
+}
+
+write_installed_whisper_pin() {
+  local whisper_sha="$1"
+  local versions_dir="${HOME}/.local/share/asryx/versions"
+  local pin_path="${versions_dir}/whisper-cpp-sha"
+
+  ensure_dir "${versions_dir}"
+
+  local tmp="${pin_path}.tmp.$$"
+  printf '%s\n' "${whisper_sha}" >"${tmp}"
+  mv -f "${tmp}" "${pin_path}"
+}
+
+sync_whisper_repo() {
+  local whisper_sha="$1"
+  local dir="${HOME}/.local/opt/whisper.cpp"
+
+  ensure_dir "${HOME}/.local/opt"
+
+  if [[ -d "${dir}/.git" ]]; then
+    log "updating whisper.cpp at ${dir}"
+    git -C "${dir}" remote set-url origin "${whisper_url}" || true
+    git -C "${dir}" fetch --depth 1 origin "${whisper_sha}"
+    git -C "${dir}" checkout --detach "${whisper_sha}"
+    git -C "${dir}" fsck --no-progress
+    git -C "${dir}" submodule update --init --recursive
+    return 0
+  fi
+
+  if [[ -e "${dir}" ]]; then
+    die "${dir} exists but is not a git checkout"
+  fi
+
+  log "cloning whisper.cpp"
+  log "from: ${whisper_url}"
+  log "to:   ${dir}"
+
+  git clone "${whisper_url}" "${dir}"
+  git -C "${dir}" fetch --depth 1 origin "${whisper_sha}"
+  git -C "${dir}" checkout --detach "${whisper_sha}"
+  git -C "${dir}" fsck --no-progress
+  git -C "${dir}" submodule update --init --recursive
+}
+
+build_whisper_cli() {
+  local dir="${HOME}/.local/opt/whisper.cpp"
+  local build_dir="${dir}/build/release"
+
+  log "configuring whisper.cpp release build in ${build_dir}"
+  cmake --fresh -S "${dir}" -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+  log "building whisper-cli"
+  cmake --build "${build_dir}" --target whisper-cli
+}
+
+install_whisper_cli_binary() {
+  local dir="${HOME}/.local/opt/whisper.cpp"
+  local build_dir="${dir}/build/release"
+  local dst_bin="${HOME}/.local/bin/whisper-cli"
+
+  ensure_dir "${HOME}/.local/bin"
+
+  local built=""
+  built="$(
+    find "${build_dir}" -type f -name whisper-cli -perm -111 2>/dev/null | head -n 1 || true
+  )"
+
+  [[ -n "${built}" ]] || die "could not locate built whisper-cli under ${build_dir}"
+
+  log "installing whisper-cli to ${dst_bin}"
+  install -m 0755 "${built}" "${dst_bin}"
+}
+
+write_default_config_if_missing() {
+  local cfg="${HOME}/.asryx.conf"
+  if [[ -e "${cfg}" ]]; then
+    return 0
+  fi
+
+  log "writing default config (missing): ${cfg}"
+  printf 'model=%s\n' "${model_name}" >"${cfg}"
+}
+
+install_and_select_model() {
+  local asryx_bin="${HOME}/.local/bin/asryx"
+
+  [[ -x "${asryx_bin}" ]] || die "expected installed binary at ${asryx_bin}"
+
+  log "installing model: ${model_name}"
+  "${asryx_bin}" --model install "${model_name}"
+
+  log "selecting model: ${model_name}"
+  "${asryx_bin}" --model use "${model_name}"
+}
+
+warn_path_if_needed() {
+  local bin_dir="${HOME}/.local/bin"
+  case ":${PATH}:" in
+    *":${bin_dir}:"*) return 0 ;;
+  esac
+
+  log "note: ${bin_dir} is not in PATH"
+  log "      add it, for example in ~/.profile:"
+  log "      export PATH=\"${bin_dir}:\$PATH\""
+}
+
+main() {
+  require_home
+  ensure_dependencies
+  resolve_source
+  build_asryx
+
+  local whisper_sha=""
+  whisper_sha="$(read_whisper_sha)"
+  log "whisper.cpp pin: ${whisper_sha}"
+
+  install_asryx_binary
+  write_installed_whisper_pin "${whisper_sha}"
+  sync_whisper_repo "${whisper_sha}"
+  build_whisper_cli
+  install_whisper_cli_binary
+  write_default_config_if_missing
+  install_and_select_model
+  warn_path_if_needed
+}
+
+main "$@"
