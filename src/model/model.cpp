@@ -7,75 +7,92 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace model {
 
 namespace {
 
-std::string trim(std::string value)
+std::filesystem::path model_dir()
 {
-  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
-    value.pop_back();
-  }
-
-  size_t start = 0;
-  while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
-    ++start;
-  }
-
-  return value.substr(start);
+  return platform::get_home_relative_path(".local/share/asryx");
 }
 
-std::string read_pin_file(const std::filesystem::path& path)
+std::filesystem::path whisper_source_dir()
 {
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    throw std::runtime_error("missing whisper.cpp pin: " + path.string());
+  const char* env_dir = std::getenv("ASRYX_WHISPER_SOURCE_DIR");
+  if (env_dir != nullptr && *env_dir != '\0') {
+    return std::filesystem::path(env_dir);
   }
 
-  std::string value;
-  std::getline(file, value);
-  value = trim(value);
-
-  if (value.empty()) {
-    throw std::runtime_error("empty whisper.cpp pin: " + path.string());
-  }
-
-  return value;
+  return platform::get_home_relative_path(".local/opt/whisper.cpp");
 }
 
-std::string whisper_cpp_sha()
+std::filesystem::path whisper_model_path(const std::string& name)
 {
-  const char* env_sha = std::getenv("ASRYX_WHISPER_SHA");
-  if (env_sha != nullptr && *env_sha != '\0') {
-    return trim(env_sha);
+  return whisper_source_dir() / "models" / ("ggml-" + name + ".bin");
+}
+
+std::filesystem::path whisper_model_downloader()
+{
+  return whisper_source_dir() / "models/download-ggml-model.sh";
+}
+
+bool file_exists_nonempty(const std::filesystem::path& path)
+{
+  return std::filesystem::exists(path) && std::filesystem::is_regular_file(path) &&
+         !std::filesystem::is_empty(path);
+}
+
+void copy_model_into_store(const std::filesystem::path& source, const std::filesystem::path& target)
+{
+  if (!file_exists_nonempty(source)) {
+    throw std::runtime_error("download did not produce model: " + source.string());
   }
 
-  const auto installed_pin =
-      platform::get_home_relative_path(".local/share/asryx/versions/whisper-cpp-sha");
-  if (std::filesystem::exists(installed_pin)) {
-    return read_pin_file(installed_pin);
-  }
+  std::filesystem::create_directories(target.parent_path());
 
-  const char* source_root = std::getenv("ASRYX_SOURCE_ROOT");
-  if (source_root != nullptr && *source_root != '\0') {
-    const auto source_pin = std::filesystem::path(source_root) / "versions/whisper-cpp-sha";
-    if (std::filesystem::exists(source_pin)) {
-      return read_pin_file(source_pin);
+  const auto tmp = target.parent_path() / ("." + target.filename().string() + ".tmp");
+
+  try {
+    std::filesystem::copy_file(source, tmp, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::rename(tmp, target);
+  }
+  catch (...) {
+    if (std::filesystem::exists(tmp)) {
+      platform::safe_delete_file(tmp);
     }
+    throw;
+  }
+}
+
+void run_whisper_model_downloader(const std::string& name)
+{
+  const auto source_dir = whisper_source_dir();
+  const auto downloader = whisper_model_downloader();
+
+  if (!std::filesystem::exists(source_dir / ".git")) {
+    throw std::runtime_error("missing whisper.cpp checkout: " + source_dir.string() +
+                             ". Run ./bootstrap first.");
   }
 
-#ifdef ASRYX_SOURCE_DIR
-  const auto compiled_pin = std::filesystem::path(ASRYX_SOURCE_DIR) / "versions/whisper-cpp-sha";
-  if (std::filesystem::exists(compiled_pin)) {
-    return read_pin_file(compiled_pin);
+  if (!std::filesystem::exists(downloader)) {
+    throw std::runtime_error("missing whisper.cpp model downloader: " + downloader.string());
   }
-#endif
 
-  throw std::runtime_error("could not resolve whisper.cpp pin");
+  std::cout << "Downloading model " << name << " via whisper.cpp downloader...\n";
+
+  const std::string script = "cd \"$1\" && bash ./models/download-ggml-model.sh \"$2\"";
+  const bool success =
+      platform::run_process_foreground({"bash", "-c", script, "asryx-model-download",
+                                        source_dir.string(), name});
+
+  if (!success) {
+    throw std::runtime_error("failed to download model " + name);
+  }
 }
 
 } // namespace
@@ -90,13 +107,12 @@ const std::vector<std::string>& get_supported_models()
 
 std::string get_model_path(const std::string& name)
 {
-  return (platform::get_home_relative_path(".local/share/asryx") / ("ggml-" + name + ".bin"))
-      .string();
+  return (model_dir() / ("ggml-" + name + ".bin")).string();
 }
 
 bool is_model_installed(const std::string& name)
 {
-  return std::filesystem::exists(get_model_path(name));
+  return file_exists_nonempty(get_model_path(name));
 }
 
 void list_models()
@@ -121,37 +137,25 @@ void install_model(const std::string& name)
     throw std::runtime_error("unsupported model size: " + name);
   }
 
-  const auto path = get_model_path(name);
-  if (std::filesystem::exists(path)) {
+  const auto target_path = std::filesystem::path(get_model_path(name));
+  if (file_exists_nonempty(target_path)) {
     std::cout << "Model " << name << " is already installed.\n";
     return;
   }
 
-  const auto dir = platform::get_home_relative_path(".local/share/asryx");
-  std::filesystem::create_directories(dir);
+  const auto downloaded_path = whisper_model_path(name);
 
-  std::cout << "Downloading model " << name << "...\n";
-
-  const std::string url = std::string("https://huggingface.co/ggerganov/whisper.cpp/resolve/") +
-                          whisper_cpp_sha() + "/ggml-" + name + ".bin";
-
-  bool success = false;
-  if (platform::command_exists("curl")) {
-    success = platform::run_process_foreground({"curl", "-L", "-f", "-o", path, url});
-  }
-  else if (platform::command_exists("wget")) {
-    success = platform::run_process_foreground({"wget", "-O", path, url});
+  if (!file_exists_nonempty(downloaded_path)) {
+    run_whisper_model_downloader(name);
   }
   else {
-    throw std::runtime_error("neither curl nor wget is available to download models");
+    std::cout << "Using cached whisper.cpp model: " << downloaded_path << "\n";
   }
 
-  if (!success) {
-    if (std::filesystem::exists(path)) {
-      platform::safe_delete_file(path);
-    }
+  copy_model_into_store(downloaded_path, target_path);
 
-    throw std::runtime_error("failed to download model " + name);
+  if (!file_exists_nonempty(target_path)) {
+    throw std::runtime_error("model install did not create " + target_path.string());
   }
 
   std::cout << "Model " << name << " installed successfully.\n";
@@ -174,7 +178,7 @@ void use_model(const std::string& name)
 
 void uninstall_model(const std::string& name)
 {
-  const auto path = get_model_path(name);
+  const auto path = std::filesystem::path(get_model_path(name));
 
   if (!std::filesystem::exists(path)) {
     std::cout << "Model " << name << " is not installed.\n";
