@@ -1,16 +1,43 @@
 <div align="center">
 
-# **_Asryx_**
+# A S R Y X
+
+Effortlessly turn your voice into text via a simple toggle.
 
 <br/>
 
-### **_Talk to your machine._**
-
-<br/>
+<p align="center">
+  <a href="https://github.com/rccyx/asryx/actions"><img src="https://img.shields.io/github/actions/workflow/status/rccyx/asryx/ci.yml?style=for-the-badge&color=black&labelColor=111111&logo=githubactions&logoColor=white" alt="CI Status"/></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/Platform-Linux-black?style=for-the-badge&color=black&labelColor=111111&logo=linux&logoColor=white" alt="Platform: Linux"/></a>
+  <a href="#installation"><img src="https://img.shields.io/badge/Offline-No_Cloud-black?style=for-the-badge&color=black&labelColor=111111" alt="Offline"/></a>
+  <a href="https://github.com/rccyx/asryx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rccyx/asryx?style=for-the-badge&color=black&labelColor=111111&logo=apache&logoColor=white" alt="License"/></a>
+</p>
 
 </div>
 
-## What is it?
+## Overview
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=lVDFpoCkvh8">
+    <img src="./assets/demo.gif" alt="asryx demo" width="100%">
+  </a>
+</p>
+
+<details>
+<summary><strong>Why?</strong></summary>
+
+<br/>
+
+Voice is always faster than typing. The problem is everything built around it: hold a key (pessimal), open a (bloated) app, pick a provider (decision fatigue), send audio to a server (privacy), wait for a response, hope the network holds (unreliable).
+
+This is supposed to be instant, not a dependency chain with a mic attached.
+
+</details>
+
+<details>
+<summary><strong>What?</strong></summary>
+
+<br/>
 
 Asryx is a native Linux voice-to-text toggle.
 
@@ -28,35 +55,93 @@ asryx
 
 Paste.
 
-That’s it,
+That's it.
 
 ```text
 record -> stop -> transcribe -> copy -> notify -> clean
 ```
 
-You've seen it in the demo.
-
 Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it will not spawn five recorders or corrupt the active transcription.
 
-No cloud API. No GUI. No Python environment. No background dashboard. No provider menu. No subscriptions, no key presistent pressing, no choose from 965 models, no do these 17 steps first and maybe it works. No Node, no Python, no Node again.
-
-## Why?
-
-Sometimes I speak for five seconds. Sometimes I pace around and talk for fifteen minutes straight while doing something else, or whatever thought needs to leave my head before it's gone forever, my fingers couldn't catch up.
-
-Opening a transcription app or holding a key for that, or sending raw speech to someone else’s API just to talk to your own computer is unreliable, aside from privacy concerns, what if you get an error back, or maybe the net shut off? See?
-
-Asryx does one thing:
-
-```text
-press keybind -> talk -> press keybind -> paste text
-```
-
-On Hyprland, you can bind it like `Alt+W`.
+You might keybind it, for example, on Hyprland:
 
 ```ini
 bind = ALT, W, exec, asryx
 ```
+
+But most importantly:
+
+No cloud APIs. No GUI. No Python envs. No dashboard. No provider menu. No subscriptions, no persistent key pressing, no choose from 965 models, no do these 17 steps first and maybe it works. No Node, no Python again.
+
+</details>
+
+<details>
+<summary><strong>How?</strong></summary>
+
+<br/>
+
+The binary wraps `whisper.cpp` with a native Linux runtime. The model inference is `whisper-cli`.
+
+Asryx owns everything around it: recording lifecycle, toggle state, locking, model lookup, clipboard, notifications, cleanup.
+
+The installer builds [whisper.cpp](https://github.com/ggml-org/whisper.cpp) from source on your machine using your system compiler, you get a single native binary that runs directly on your CPU.
+
+```text
+press
+  -> start local recorder
+  -> write recorder pid
+  -> mark state as recording
+
+press again
+  -> stop recorder
+  -> run whisper-cli on the wav
+  -> read transcript
+  -> copy to clipboard
+  -> notify
+  -> clean runtime files
+```
+
+The first press starts the recorder. PipeWire through `pw-record` is preferred, falls back to ALSA through `arecord`. Audio is captured as a temporary WAV file: mono, 16 kHz, signed 16-bit.
+
+The second press stops the recorder by signal, waits for the WAV to finalize, trims the edges, and pushes it into the clipboard.
+
+Clipboard output:
+
+```text
+wl-copy                     # Wayland
+xclip -selection clipboard  # X11 fallback
+```
+
+Notifications:
+
+```text
+notify-send
+```
+
+The binary emits the event. Mako, Dunst, or your desktop environment displays it.
+
+Runtime state lives under:
+
+```text
+$XDG_RUNTIME_DIR/asryx
+```
+
+Falls back to `/tmp/asryx-$UID` if `$XDG_RUNTIME_DIR` is unavailable.
+
+The directory holds only temporary payloads:
+
+```text
+lock/
+rec.pid
+rec.wav
+rec.err
+state
+out.txt
+```
+
+After a successful transcription, all of it is deleted. The transcript survives only through your clipboard.
+
+</details>
 
 ## Installation
 
@@ -74,8 +159,8 @@ That's it.
 It runs in this order.
 
 - validates your home directory
-- installs missing build dependencies on supported apt-based systems
-- builds the native Asryx binary locally
+- installs missing build dependencies on supported distros
+- builds the native binary locally
 - installs `asryx` into `~/.local/bin/asryx`
 - clones the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
 - builds `whisper-cli`
@@ -104,25 +189,14 @@ The install uses:
 ~/.asryx.conf
 ```
 
-Runtime files live under the user runtime directory, usually:
-
-```text
-$XDG_RUNTIME_DIR/asryx
-```
-
-This tool does NOT keep transcript history. Does NOT keep audio history.
-
-Once the transcript reaches your clipboard, the temporary recording payload is cleaned.
-
 </details>
 
-After installation:
+After installation. You should see the current runtime state.
 
-```bash
-asryx status
+```text
+$ asryx status
+idle
 ```
-
-You should see the current runtime state.
 
 ## First use
 
@@ -171,7 +245,7 @@ It removes Asryx-owned files.
 $XDG_RUNTIME_DIR/asryx
 ```
 
-It does not remove shared system packages.
+It doesn't remove shared system packages.
 
 It refuses dangerous paths such as `/`, `$HOME`, empty paths, and non-absolute paths.
 
@@ -179,7 +253,7 @@ It refuses dangerous paths such as `/`, `$HOME`, empty paths, and non-absolute p
 
 ## CLI
 
-The surface area is tiny:
+Surface area:
 
 ```
 asryx
@@ -218,7 +292,7 @@ asryx --model uninstall small.en
 
 Supported models:
 
-```bash
+```
 tiny.en
 tiny
 base.en
@@ -230,8 +304,27 @@ medium
 large-v1
 large-v2
 large-v3
+large-v3-turbo
 large
 ```
+
+Models ending in `.en` are English-only. All others are multilingual.
+
+| Model              | Disk    | RAM     | Speed vs large |
+| ------------------ | ------- | ------- | -------------- |
+| tiny / tiny.en     | 75 MiB  | ~273 MB | ~10x           |
+| base / base.en     | 142 MiB | ~388 MB | ~7x            |
+| small / small.en   | 466 MiB | ~852 MB | ~4x            |
+| medium / medium.en | 1.5 GiB | ~2.1 GB | ~2x            |
+| large-v3-turbo     | 1.5 GiB | ~2.3 GB | ~8x            |
+| large-v1 / v2 / v3 | 2.9 GiB | ~3.9 GB | 1x             |
+
+Speed is relative to large on CPU. RAM figures are whisper.cpp runtime.
+
+`base.en` is the default. It covers most use cases and starts fast.
+
+> [!TIP]
+> `large-v3-turbo` is the best upgrade: near-large accuracy at roughly small-level speed, for about the same disk cost as `medium`.
 
 Installed models live in:
 
@@ -245,7 +338,7 @@ For example:
 ~/.local/share/asryx/ggml-base.en.bin
 ```
 
-The active model is stored in:
+The active model config is stored in:
 
 ```bash
 ~/.asryx.conf
@@ -259,8 +352,6 @@ model=base.en
 
 ## Config
 
-This binary uses one small config file.
-
 Switching models through the CLI updates this file.
 
 ```bash
@@ -269,13 +360,13 @@ asryx --model use small.en
 
 You can also edit it manually.
 
-```text
+```bash
 model=small.en
 ```
 
 ## Audio
 
-Asryx prefers PipeWire.
+Prefers PipeWire.
 
 ```text
 pw-record
@@ -289,7 +380,7 @@ arecord
 
 ### Clipboard
 
-Asryx prefers Wayland clipboard tooling.
+Prefers Wayland clipboard tooling.
 
 ```text
 wl-copy
@@ -303,49 +394,27 @@ xclip
 
 ### Notifications
 
-Asryx uses:
+Uses:
 
 ```text
 notify-send
 ```
 
 > [!IMPORTANT]
-> You still need a notification daemon such as Mako, Dunst, or your desktop environment’s default notification service to see popups.
+> You still need a notification daemon such as Mako, Dunst, or your desktop environment's default notification service to see popups.
 
 ## Troubleshooting
 
-Most issues are usually one of these:
+If it compiles successfully, most trouble comes from these:
 
 - no microphone recorder available
-- the microphone is off, and the audio is piped to it. Transcribes nothing.
+- microphone is muted or disconnected, transcribes nothing
 - PipeWire or ALSA device setup issue
 - missing clipboard provider
 - missing notification daemon
-- model not installed
 - `~/.local/bin` not in `PATH`
 
-Check the installed command first.
-
-```bash
-asryx status
-```
-
-Check models.
-
-```bash
-asryx --model list
-```
-
-Install the default model again if needed.
-
-```bash
-asryx --model install base.en
-asryx --model use base.en
-```
-
-If audio behaves weirdly, it is usually the local Linux audio stack, interface, microphone, PipeWire, or ALSA path.
-
-Open an issue with your distro, session type, recorder availability, model name, and the exact terminal output.
+Otherwise, open an issue (with details).
 
 ## License
 
