@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "**.txt"
+      - "LICENSE"
+
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "**.txt"
+      - "LICENSE"
+
+concurrency:
+  group: CI-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    uses: ./.github/workflows/on-workflow-call-shellcheck.yml
+
+  lint:
+    uses: ./.github/workflows/on-workflow-call-lint.yml
+
+  format:
+    uses: ./.github/workflows/on-workflow-call-format.yml
+
+  runtime-safety:
+    uses: ./.github/workflows/on-workflow-call-runtime-safety
+
+  test:
+    uses: ./.github/workflows/on-workflow-call-runtime-safety
+
+  build:
+    uses: ./.github/workflows/on-workflow-call-build
+
+  # smoke:
+  #   # TODO: this is is supposed to build & and check the binary & then uninstall on the supported distros.
+  #   uses: ./.github/workflows/on-workflow-call-smoke

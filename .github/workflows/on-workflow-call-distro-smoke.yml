@@ -1,0 +1,113 @@
+name: distro-smoke
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: debian-bookworm
+            image: debian:bookworm
+          - id: debian-trixie
+            image: debian:trixie
+          - id: debian-sid
+            image: debian:sid
+
+          - id: ubuntu-24.04
+            image: ubuntu:24.04
+          - id: popos-22.04
+            image: nycticoracs/pop_os:22.04
+
+          # mint
+          - id: mint-21.3
+            image: linuxmintd/mint21.3-amd64:latest
+          - id: mint-22.1
+            image: linuxmintd/mint22.1-amd64:latest
+
+          # fedora
+          - id: fedora-40
+            image: fedora:40
+
+          # arch
+          - id: arch-latest
+            image: archlinux:latest
+
+    name: ${{ matrix.id }}
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: base deps (sudo + git)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if command -v apt-get >/dev/null 2>&1; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends sudo ca-certificates curl git
+          elif command -v dnf >/dev/null 2>&1; then
+            dnf -y install sudo ca-certificates curl git
+          elif command -v pacman >/dev/null 2>&1; then
+            pacman -Sy --noconfirm || true
+            if command -v pacman-key >/dev/null 2>&1; then
+              pacman-key --init || true
+              pacman-key --populate archlinux || true
+            fi
+            pacman -Sy --noconfirm
+            pacman -S --noconfirm --needed sudo ca-certificates curl git
+          else
+            echo "no supported package manager found"
+            exit 1
+          fi
+
+      - name: create ci user (passwordless sudo)
+        shell: bash
+        run: |
+          set -euo pipefail
+          useradd -m -s /bin/bash ci || true
+          echo 'ci ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/ci
+          chmod 0440 /etc/sudoers.d/ci
+
+      - name: install
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/install --yes"
+
+      - name: verify install
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u ci -H bash -lc "set -euo pipefail
+            test -x /home/ci/.local/bin/whisper-cli
+            test -x /home/ci/.local/bin/asryx
+            test -f /home/ci/.local/share/asryx/asryx.env
+            test -f /home/ci/.local/share/asryx/install.manifest
+            /home/ci/.local/bin/whisper-cli --help >/dev/null
+          "
+
+      - name: uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u ci -H bash -lc "cd '$GITHUB_WORKSPACE'; bash ./package/uninstall --yes"
+
+      - name: verify uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -u ci -H bash -lc "set -euo pipefail
+            test ! -e /home/ci/.local/share/asryx/install.manifest
+          "

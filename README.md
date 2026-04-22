@@ -2,8 +2,6 @@
 
 # A S R Y X
 
-Effortlessly turn your voice into text via a simple toggle.
-
 <br/>
 
 <p align="center">
@@ -414,7 +412,7 @@ If it compiles successfully, most trouble comes from these:
 - missing notification daemon
 - `~/.local/bin` not in `PATH`
 
-Otherwise, open an issue (with details).
+Otherwise, open an issue.
 
 ## License
 
