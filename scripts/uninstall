@@ -1,46 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-log() { printf 'asryx uninstall: %s\n' "$*"; }
-die() {
-  printf 'asryx uninstall: error: %s\n' "$*" >&2
-  exit 1
-}
-
-require_home() {
-  [[ -n "${HOME:-}" ]] || die "HOME is not set"
-  [[ "${HOME}" == /* ]] || die "HOME is not an absolute path; refusing to continue: ${HOME}"
-  [[ "${HOME}" != "/" ]] || die "HOME resolved to /; refusing to continue"
-}
-
-require_absolute() {
-  local path="$1"
-  [[ -n "${path}" ]] || die "refusing to delete empty path"
-  [[ "${path}" == /* ]] || die "refusing to delete non-absolute path: ${path}"
-  [[ "${path}" != "/" ]] || die "refusing to delete /"
-  [[ "${path}" != "${HOME}" ]] || die "refusing to delete HOME: ${path}"
-}
-
-remove_one() {
-  local path="$1"
-  require_absolute "${path}"
-
-  if [[ ! -e "${path}" && ! -L "${path}" ]]; then
-    log "already absent: ${path}"
-    return 0
-  fi
-
-  log "removing: ${path}"
-
-  if [[ -d "${path}" && ! -L "${path}" ]]; then
-    rm -rf -- "${path}"
-  else
-    rm -f -- "${path}"
-  fi
-}
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck disable=SC2034
+ASRYX_LOG_PREFIX="asryx uninstall"
+# shellcheck source=scripts/lib/_common.sh
+source "${script_dir}/lib/_common.sh"
+# shellcheck source=scripts/lib/_paths.sh
+source "${script_dir}/lib/_paths.sh"
 
 main() {
-  require_home
+  _asryx_require_home
 
   local runtime_dir="${XDG_RUNTIME_DIR:-}"
   local runtime_asryx=""
@@ -63,10 +33,10 @@ main() {
   fi
 
   for path in "${owned[@]}"; do
-    remove_one "${path}"
+    _asryx_remove_one "${path}"
   done
 
-  log "done"
+  _asryx_log "done"
 }
 
 main "$@"

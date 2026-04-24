@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/lib/_common.sh
+source "${script_dir}/lib/_common.sh"
+
 mode="${1:---check}"
 if [[ "${mode}" != "--check" && "${mode}" != "--fix" ]]; then
   printf 'error: unknown format mode: %s\n' "${mode}" >&2
@@ -8,7 +12,8 @@ if [[ "${mode}" != "--check" && "${mode}" != "--fix" ]]; then
   exit 2
 fi
 
-clang_format="$(scripts/resolve-tool clang-format)"
+clang_format="$(_asryx_resolve_tool clang-format)"
+cd "$(_asryx_repo_root)"
 
 mapfile -d '' files < <(
   find src tests -type f \

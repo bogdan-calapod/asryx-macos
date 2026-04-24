@@ -1,24 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-has() { command -v "$1" >/dev/null 2>&1; }
-sudo_cmd() { [ "${EUID:-$(id -u)}" -eq 0 ] || printf '%s' sudo; }
-log() { printf '%s\n' "==> $*"; }
-err() {
-  printf 'error: %s\n' "$*" >&2
-  exit 1
-}
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck disable=SC2034
+ASRYX_LOG_PREFIX="asryx install-dev-deps"
+# shellcheck source=scripts/lib/_common.sh
+source "${script_dir}/lib/_common.sh"
+# shellcheck source=scripts/lib/_deps.sh
+source "${script_dir}/lib/_deps.sh"
 
-pm=""
-if has apt-get; then
-  pm="apt"
-else
-  err "unsupported distro: need apt-get"
-fi
-
-log "installing asryx development dependencies (${pm})"
-$(sudo_cmd) apt-get update
-$(sudo_cmd) apt-get install -y --no-install-recommends \
-  bash ca-certificates curl git build-essential cmake ninja-build pkg-config \
-  clang clang-format clang-tidy cppcheck shellcheck python3 just \
-  pipewire alsa-utils wl-clipboard xclip libnotify-bin
+_asryx_install_dev_dependencies

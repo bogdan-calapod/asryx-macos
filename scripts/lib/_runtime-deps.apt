@@ -1,0 +1,13 @@
+bash
+git
+cmake
+ninja-build
+g++
+curl
+ca-certificates
+coreutils
+pipewire
+alsa-utils
+wl-clipboard
+xclip
+libnotify-bin

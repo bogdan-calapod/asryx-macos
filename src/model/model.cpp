@@ -25,7 +25,7 @@ std::filesystem::path whisper_source_dir()
 {
   const char* env_dir = std::getenv("ASRYX_WHISPER_SOURCE_DIR");
   if (env_dir != nullptr && *env_dir != '\0') {
-    return std::filesystem::path(env_dir);
+    return {env_dir};
   }
 
   return platform::get_home_relative_path(".local/opt/whisper.cpp");
@@ -85,10 +85,9 @@ void run_whisper_model_downloader(const std::string& name)
 
   std::cout << "Downloading model " << name << " via whisper.cpp downloader...\n";
 
-  const std::string script = "cd \"$1\" && bash ./models/download-ggml-model.sh \"$2\"";
-  const bool success =
-      platform::run_process_foreground({"bash", "-c", script, "asryx-model-download",
-                                        source_dir.string(), name});
+  const std::string script = R"(cd "$1" && bash ./models/download-ggml-model.sh "$2")";
+  const bool success = platform::run_process_foreground(
+      {"bash", "-c", script, "asryx-model-download", source_dir.string(), name});
 
   if (!success) {
     throw std::runtime_error("failed to download model " + name);
@@ -99,9 +98,9 @@ void run_whisper_model_downloader(const std::string& name)
 
 const std::vector<std::string>& get_supported_models()
 {
-  static const std::vector<std::string> models = {"tiny.en",  "tiny",     "base.en",   "base",
-                                                  "small.en", "small",    "medium.en", "medium",
-                                                  "large-v1", "large-v2", "large-v3",  "large"};
+  static const std::vector<std::string> models = {
+      "tiny.en", "tiny",     "base.en",  "base",     "small.en",       "small", "medium.en",
+      "medium",  "large-v1", "large-v2", "large-v3", "large-v3-turbo", "large"};
   return models;
 }
 

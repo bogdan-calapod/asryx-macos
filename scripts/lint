@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/lib/_common.sh
+source "${script_dir}/lib/_common.sh"
+
 build_dir="build/release"
 compile_commands="${build_dir}/compile_commands.json"
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+repo_root="$(_asryx_repo_root)"
+cd "${repo_root}"
 
 if [[ ! -f "${compile_commands}" ]]; then
   printf 'error: missing compile database: %s\n' "${compile_commands}" >&2
@@ -17,8 +22,8 @@ if ! grep -Fq "\"file\": \"${repo_root}/" "${compile_commands}"; then
   exit 2
 fi
 
-clang_tidy="$(scripts/resolve-tool clang-tidy)"
-cppcheck="$(scripts/resolve-tool cppcheck)"
+clang_tidy="$(_asryx_resolve_tool clang-tidy)"
+cppcheck="$(_asryx_resolve_tool cppcheck)"
 
 python3 scripts/lib/check-line-limits.py
 python3 scripts/lib/check-module-boundaries.py

@@ -143,11 +143,31 @@ After a successful transcription, all of it is deleted. The transcript survives 
 
 ## Installation
 
+Simply run:
+
 ```bash
 bash <(curl -fsSL http://raw.githubusercontent.com/rccyx/asryx/refs/heads/main/bootstrap)
 ```
 
-That's it.
+The bootstrap installs missing dependencies automatically on Debian/Ubuntu, Fedora, and Arch-based systems.
+
+Other distros are supported manually. Install packages that provide:
+
+```
+bash
+git
+cmake
+ninja
+c++ compiler
+curl
+ca-certificates
+sha256sum
+pw-record or arecord
+wl-copy or xclip
+notify-send
+```
+
+Then run the bootstrap again.
 
 <details>
 <summary><strong>What the installer does</strong></summary>
@@ -226,7 +246,7 @@ Comes off clean as it got in.
 ```
 
 <details>
-<summary><strong>What the uninstaller removes</strong></summary>
+<summary><strong>What the uninstaller does</strong></summary>
 
 <br/>
 

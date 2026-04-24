@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-shellcheck_bin="$(scripts/resolve-tool shellcheck)"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/lib/_common.sh
+source "${script_dir}/lib/_common.sh"
+
+shellcheck_bin="$(_asryx_resolve_tool shellcheck)"
+cd "$(_asryx_repo_root)"
 
 "${shellcheck_bin}" -x \
-  bootstrap \
+  scripts/bootstrap \
   scripts/fmt \
   scripts/install-dev-deps \
   scripts/lint \
   scripts/resolve-tool \
   scripts/shellcheck \
-  scripts/uninstall
+  scripts/uninstall \
+  scripts/lib/_common.sh \
+  scripts/lib/_paths.sh \
+  scripts/lib/_deps.sh \
+  scripts/lib/_repos.sh
