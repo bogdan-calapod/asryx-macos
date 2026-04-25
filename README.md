@@ -143,31 +143,20 @@ After a successful transcription, all of it is deleted. The transcript survives 
 
 ## Installation
 
-Simply run:
-
 ```bash
-bash <(curl -fsSL http://raw.githubusercontent.com/rccyx/asryx/refs/heads/main/bootstrap)
+bash <(curl -fsSL https://raw.githubusercontent.com/rccyx/asryx/refs/heads/main/scripts/bootstrap)
 ```
 
-The bootstrap installs missing dependencies automatically on Debian/Ubuntu, Fedora, and Arch-based systems.
+Dependencies are installed automatically on **Debian/Ubuntu** (apt), **Fedora** (dnf), and **Arch-based** (pacman) systems.
 
-Other distros are supported manually. Install packages that provide:
+All other distros: install the packages below manually, then rerun the bootstrap.
 
 ```
-bash
-git
-cmake
-ninja
-c++ compiler
-curl
-ca-certificates
-sha256sum
+bash  git  cmake  ninja  c++ compiler  curl  ca-certificates  sha256sum
 pw-record or arecord
 wl-copy or xclip
 notify-send
 ```
-
-Then run the bootstrap again.
 
 <details>
 <summary><strong>What the installer does</strong></summary>
