@@ -26,9 +26,9 @@
 
 <br/>
 
-Voice is always faster than typing. The problem is everything built around it: hold a key (pessimal), open a (bloated) app, pick a provider (decision fatigue), send audio to a server (privacy), wait for a response, hope the network holds (unreliable).
+Voice is always faster than typing. The problem is everything built around it: hold a key (pessimal), open a (bloated) app, pick a provider/model (decision fatigue), send audio to a server (privacy), wait for a response (speed), hope the network holds (unreliable).
 
-This is supposed to be instant, not a dependency chain with a mic attached.
+It's supposed to be instant, not a dependency chain with a mic attached.
 
 </details>
 
@@ -37,7 +37,7 @@ This is supposed to be instant, not a dependency chain with a mic attached.
 
 <br/>
 
-Asryx is a native Linux voice-to-text toggle.
+Asryx is a lightweight native Linux voice-to-text toggle.
 
 Press once to record. Talk as long as you want. Press again to stop, it transcribes locally, copies the text to your clipboard, notifies you, and cleans up.
 
@@ -45,13 +45,17 @@ Press once to record. Talk as long as you want. Press again to stop, it transcri
 asryx
 ```
 
-Speak.
+It pushes a notification saying "recording..."
+
+You speak.
 
 ```bash
 asryx
 ```
 
-Paste.
+Says "copied to clipboard"
+
+You paste the text anywhere.
 
 That's it.
 
@@ -59,22 +63,32 @@ That's it.
 record -> stop -> transcribe -> copy -> notify -> clean
 ```
 
-Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it will not spawn five recorders or corrupt the active transcription.
+Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it won' spawn five recorders or corrupt the active transcription.
 
-You might keybind it, for example, on Hyprland:
+Also, the temporary audio and transcript files are cleaned after the run.
+
+You might also want to keybind it, for example, on Hyprland:
 
 ```ini
 bind = ALT, W, exec, asryx
 ```
 
-But most importantly:
-
-No cloud APIs. No GUI. No Python envs. No dashboard. No provider menu. No subscriptions, no persistent key pressing, no choose from 965 models, no do these 17 steps first and maybe it works. No Node, no Python again.
+Also, make sure you se a clipboard manager, so the transcript is recoverable if you accidentally copy something else after a long recording.
 
 </details>
 
 <details>
-<summary><strong>How?</strong></summary>
+<summary><strong>How is this different?</strong></summary>
+<br/>
+
+Basically:
+
+No cloud. No GUI(s). No Python env hell. No background daemon(s). No dashboard(s). No container(s). No subscription(s), no persistent key pressing, no choose from these 965 models you'll never use, no do these 22 steps first and maybe it works. No Node, no Python again.
+
+</details>
+
+<details>
+<summary><strong>How it works?</strong></summary>
 
 <br/>
 
@@ -144,19 +158,41 @@ After a successful transcription, all of it is deleted. The transcript survives 
 ## Installation
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/rccyx/asryx/refs/heads/main/scripts/bootstrap)
+git clone https://github.com/rccyx/asryx
+cd asryx && bash ./scripts/bootstrap
 ```
 
 Dependencies are installed automatically on **Debian/Ubuntu** (apt), **Fedora** (dnf), and **Arch-based** (pacman) systems.
 
-All other distros: install the packages below manually, then rerun the bootstrap.
+If you're not on a supported distro, ensure the following core tools are installed before rerunning the bootstrap script:
 
-```
-bash  git  cmake  ninja  c++ compiler  curl  ca-certificates  sha256sum
-pw-record or arecord
-wl-copy or xclip
-notify-send
-```
+Core Utilities:
+
+- bash
+- git
+- ca-certificates
+- curl
+- sha256sum
+
+Build Tools:
+
+- cmake
+- ninja
+- a C++ compiler (`g++` or `clang++`)
+
+Audio Capture:
+
+- `pw-record` (PipeWire)
+- `arecord` (ALSA fallback)
+
+Clipboard & Alerts:
+
+- `wl-copy` (Wayland)
+- `xclip` (X11 fallback)
+- `notify-send`
+
+> [!IMPORTANT]
+> To receive visual desktop alerts such as `recording...` or `copied...`, ensure a notification daemon like Mako or Dunst is active.
 
 <details>
 <summary><strong>What the installer does</strong></summary>
@@ -183,7 +219,7 @@ The default model is:
 base.en
 ```
 
-Models are downloaded through the official `whisper.cpp` model downloader.
+Models are downloaded through the official `whisper.cpp` model downloader (which is HuggingFace).
 
 The install uses:
 
@@ -205,30 +241,11 @@ $ asryx status
 idle
 ```
 
-## First use
+You can use this if you ever need to know what the engine is currently doing (useful for UI scripts like Polybar or Waybar).
 
-Start recording.
-
-```bash
-asryx
-```
-
-Stop and transcribe.
-
-```bash
-asryx
-```
-
-Then paste normally.
-
-The transcript is copied to your clipboard. The temporary audio and transcript files are cleaned after the run.
-
-> [!TIP]
-> Use a clipboard manager. Asryx gives you the transcript through the clipboard and then cleans its runtime files. A clipboard manager keeps the transcript recoverable if you accidentally copy something else after a long recording.
+Outputs: (idle, recording, or transcribing)
 
 ## Uninstallation
-
-Comes off clean as it got in.
 
 ```bash
 ./scripts/uninstall
@@ -351,12 +368,6 @@ The active model config is stored in:
 ~/.asryx.conf
 ```
 
-Default config:
-
-```bash
-model=base.en
-```
-
 ## Config
 
 Switching models through the CLI updates this file.
@@ -385,43 +396,9 @@ If unavailable, it falls back to ALSA.
 arecord
 ```
 
-### Clipboard
+## Having trouble?
 
-Prefers Wayland clipboard tooling.
-
-```text
-wl-copy
-```
-
-If unavailable, it falls back to X11.
-
-```text
-xclip
-```
-
-### Notifications
-
-Uses:
-
-```text
-notify-send
-```
-
-> [!IMPORTANT]
-> You still need a notification daemon such as Mako, Dunst, or your desktop environment's default notification service to see popups.
-
-## Troubleshooting
-
-If it compiles successfully, most trouble comes from these:
-
-- no microphone recorder available
-- microphone is muted or disconnected, transcribes nothing
-- PipeWire or ALSA device setup issue
-- missing clipboard provider
-- missing notification daemon
-- `~/.local/bin` not in `PATH`
-
-Otherwise, open an issue.
+Open an issue.
 
 ## License
 
