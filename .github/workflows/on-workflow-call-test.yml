@@ -10,16 +10,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
-    env:
-      DEBIAN_FRONTEND: noninteractive
     steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates just cmake build-essential
-      - name: Run tests via just
-        run: just test
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: base runner
+        uses: ./.github/actions/base-runner
+
+      - name: test
+        run: just t

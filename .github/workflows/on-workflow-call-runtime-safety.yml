@@ -1,4 +1,4 @@
-name: runtime-safety
+name: runtime safety
 
 on:
   workflow_dispatch:
@@ -8,18 +8,14 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  runtime-safety:
     runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
-    env:
-      DEBIAN_FRONTEND: noninteractive
     steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates just cmake build-essential clang llvm
-      - name: Run runtime safety check via just
-        run: just runtime-safety-check
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: base runner
+        uses: ./.github/actions/base-runner
+
+      - name: runtime safety
+        run: just r

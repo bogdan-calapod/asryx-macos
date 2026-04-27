@@ -10,10 +10,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: debian:trixie
-    env:
-      DEBIAN_FRONTEND: noninteractive
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/build
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: base runner
+        uses: ./.github/actions/base-runner
+
+      - name: build
+        run: just b

@@ -20,25 +20,27 @@ concurrency:
   group: CI-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   shellcheck:
-    uses: ./.github/workflows/on-workflow-call-shellcheck.yml
-
-  lint:
-    uses: ./.github/workflows/on-workflow-call-lint.yml
+    uses: ./.github/workflows/on-workflow-call-shell-check.yml
 
   format:
     uses: ./.github/workflows/on-workflow-call-format.yml
 
-  runtime-safety:
-    uses: ./.github/workflows/on-workflow-call-runtime-safety
-
-  test:
-    uses: ./.github/workflows/on-workflow-call-runtime-safety
+  lint:
+    uses: ./.github/workflows/on-workflow-call-lint.yml
 
   build:
-    uses: ./.github/workflows/on-workflow-call-build
+    uses: ./.github/workflows/on-workflow-call-build.yml
 
-  # smoke:
-  #   # TODO: this is is supposed to build & and check the binary & then uninstall on the supported distros.
-  #   uses: ./.github/workflows/on-workflow-call-smoke
+  test:
+    uses: ./.github/workflows/on-workflow-call-test.yml
+
+  runtime-safety:
+    uses: ./.github/workflows/on-workflow-call-runtime-safety.yml
+
+  distro-smoke:
+    uses: ./.github/workflows/on-workflow-call-distro-smoke.yml
