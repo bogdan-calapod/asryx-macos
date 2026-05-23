@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# shellcheck disable=SC2034
 ASRYX_LOG_PREFIX="asryx install-dev-deps"
 # shellcheck source=scripts/lib/_common.sh
 source "${script_dir}/lib/_common.sh"

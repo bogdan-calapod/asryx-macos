@@ -1,12 +1,7 @@
-"""
-This serves on purpose & one purpose only: no one in the codebase is allowed to delete files directly
-except the filesystem abstraction layer
-"""
+#!/usr/bin/env python3
 from pathlib import Path
 import re
 import sys
-
-
 
 ROOT = Path(__file__).resolve().parents[2]
 PATTERNS = [
@@ -20,15 +15,20 @@ ALLOWED_FILES = {
     "src/platform/fs.cpp",
     "tests/test_main.cpp",
 }
+
 violations: list[str] = []
+
 for base in (ROOT / "src", ROOT / "tests"):
     if not base.exists():
         continue
+
     for path in base.rglob("*.cpp"):
         rel = str(path.relative_to(ROOT))
         if rel in ALLOWED_FILES:
             continue
-        for no, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for no, line in enumerate(lines, start=1):
             if "safe_delete" in line:
                 continue
             if any(pattern.search(line) for pattern in PATTERNS):

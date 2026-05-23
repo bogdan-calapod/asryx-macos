@@ -2,47 +2,28 @@
 set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# shellcheck disable=SC2034
+repo_dir="$(cd -- "${script_dir}/.." && pwd -P)"
+
 ASRYX_LOG_PREFIX="asryx bootstrap"
 # shellcheck source=scripts/lib/_common.sh
 source "${script_dir}/lib/_common.sh"
-# shellcheck source=scripts/lib/_paths.sh
-source "${script_dir}/lib/_paths.sh"
 # shellcheck source=scripts/lib/_deps.sh
 source "${script_dir}/lib/_deps.sh"
-# shellcheck source=scripts/lib/_repos.sh
-source "${script_dir}/lib/_repos.sh"
 
 export GIT_TERMINAL_PROMPT=0
 
-repo_url="${ASRYX_REPO_URL:-https://github.com/rccyx/asryx.git}"
-repo_ref="${ASRYX_REF:-main}"
-repo_dir="${ASRYX_REPO_DIR:-${HOME}/.local/opt/asryx}"
-model_name="${ASRYX_MODEL:-base.en}"
-whisper_url="${ASRYX_WHISPER_REPO_URL:-https://github.com/ggerganov/whisper.cpp.git}"
-
-resolve_source() {
-  local current_root=""
-
-  current_root="$(_asryx_current_repo || true)"
-  if [[ -n "${current_root}" ]]; then
-    repo_dir="${current_root}"
-    _asryx_log "using current asryx checkout: ${repo_dir}"
-    return 0
-  fi
-
-  _asryx_sync_branch_repo asryx "${repo_url}" "${repo_ref}" "${repo_dir}"
-}
+model_name="base.en"
+whisper_url="https://github.com/ggerganov/whisper.cpp.git"
+whisper_dir="${HOME}/.local/opt/whisper.cpp"
 
 read_whisper_sha() {
   local path="${repo_dir}/versions/whisper-cpp-sha"
-
   [[ -s "${path}" ]] || _asryx_die "missing whisper.cpp pin: ${path}"
   tr -d '[:space:]' <"${path}"
 }
 
 build_asryx() {
-  _asryx_log "configuring asryx release build in ${repo_dir}/build/release"
+  _asryx_log "configuring asryx"
   cmake --fresh --preset release -S "${repo_dir}"
 
   _asryx_log "building asryx"
@@ -53,11 +34,10 @@ install_asryx_binary() {
   local src_bin="${repo_dir}/build/release/asryx"
   local dst_bin="${HOME}/.local/bin/asryx"
 
-  [[ -x "${src_bin}" ]] || _asryx_die "expected built binary at ${src_bin}"
-
+  [[ -x "${src_bin}" ]] || _asryx_die "missing built binary: ${src_bin}"
   _asryx_ensure_dir "${HOME}/.local/bin"
 
-  _asryx_log "installing asryx to ${dst_bin}"
+  _asryx_log "installing ${dst_bin}"
   install -m 0755 "${src_bin}" "${dst_bin}"
 }
 
@@ -65,71 +45,71 @@ write_installed_whisper_pin() {
   local whisper_sha="$1"
   local versions_dir="${HOME}/.local/share/asryx/versions"
   local pin_path="${versions_dir}/whisper-cpp-sha"
-  local tmp=""
+  local tmp="${pin_path}.tmp.$$"
 
   _asryx_ensure_dir "${versions_dir}"
-
-  tmp="${pin_path}.tmp.$$"
   printf '%s\n' "${whisper_sha}" >"${tmp}"
   mv -f "${tmp}" "${pin_path}"
 }
 
 sync_whisper_repo() {
   local whisper_sha="$1"
-  local dir="${HOME}/.local/opt/whisper.cpp"
 
   _asryx_ensure_dir "${HOME}/.local/opt"
-  _asryx_sync_detached_repo whisper.cpp "${whisper_url}" "${whisper_sha}" "${dir}"
+
+  if [[ -d "${whisper_dir}/.git" ]]; then
+    _asryx_log "updating whisper.cpp"
+    git -C "${whisper_dir}" fetch --depth 1 origin "${whisper_sha}"
+  else
+    if [[ -e "${whisper_dir}" ]]; then
+      _asryx_die "${whisper_dir} exists but is not a git checkout"
+    fi
+    _asryx_log "cloning whisper.cpp"
+    git clone "${whisper_url}" "${whisper_dir}"
+    git -C "${whisper_dir}" fetch --depth 1 origin "${whisper_sha}"
+  fi
+
+  git -C "${whisper_dir}" checkout --detach "${whisper_sha}"
+  git -C "${whisper_dir}" fsck --no-progress
+  git -C "${whisper_dir}" submodule update --init --recursive
 }
 
 build_whisper_cli() {
-  local dir="${HOME}/.local/opt/whisper.cpp"
-  local build_dir="${dir}/build/release"
+  local build_dir="${whisper_dir}/build/release"
 
-  _asryx_log "configuring whisper.cpp release build in ${build_dir}"
-  cmake --fresh -S "${dir}" -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+  _asryx_log "configuring whisper.cpp"
+  cmake --fresh -S "${whisper_dir}" -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
 
   _asryx_log "building whisper-cli"
   cmake --build "${build_dir}" --target whisper-cli
 }
 
 install_whisper_cli_binary() {
-  local dir="${HOME}/.local/opt/whisper.cpp"
-  local build_dir="${dir}/build/release"
+  local build_dir="${whisper_dir}/build/release"
   local dst_bin="${HOME}/.local/bin/whisper-cli"
   local built=""
 
+  built="$(find "${build_dir}" -type f -name whisper-cli -perm -111 2>/dev/null | head -n 1 || true)"
+  [[ -n "${built}" ]] || _asryx_die "could not locate whisper-cli under ${build_dir}"
+
   _asryx_ensure_dir "${HOME}/.local/bin"
-
-  built="$(
-    find "${build_dir}" -type f -name whisper-cli -perm -111 2>/dev/null | head -n 1 || true
-  )"
-
-  [[ -n "${built}" ]] || _asryx_die "could not locate built whisper-cli under ${build_dir}"
-
-  _asryx_log "installing whisper-cli to ${dst_bin}"
+  _asryx_log "installing ${dst_bin}"
   install -m 0755 "${built}" "${dst_bin}"
 }
 
 write_default_config_if_missing() {
   local cfg="${HOME}/.asryx.conf"
-  if [[ -e "${cfg}" ]]; then
-    return 0
-  fi
+  [[ -e "${cfg}" ]] && return 0
 
-  _asryx_log "writing default config (missing): ${cfg}"
+  _asryx_log "writing ${cfg}"
   printf 'model=%s\n' "${model_name}" >"${cfg}"
 }
 
 install_and_select_model() {
   local asryx_bin="${HOME}/.local/bin/asryx"
 
-  [[ -x "${asryx_bin}" ]] || _asryx_die "expected installed binary at ${asryx_bin}"
-
-  _asryx_log "installing model: ${model_name}"
+  [[ -x "${asryx_bin}" ]] || _asryx_die "missing installed binary: ${asryx_bin}"
   "${asryx_bin}" --model install "${model_name}"
-
-  _asryx_log "selecting model: ${model_name}"
   "${asryx_bin}" --model use "${model_name}"
 }
 
@@ -140,14 +120,12 @@ warn_path_if_needed() {
   esac
 
   _asryx_log "note: ${bin_dir} is not in PATH"
-  _asryx_log "      add it, for example in ~/.profile:"
-  _asryx_log "      export PATH=\"${bin_dir}:\$PATH\""
+  _asryx_log "      add: export PATH=\"${bin_dir}:\$PATH\""
 }
 
 main() {
   _asryx_require_home
-  _asryx_ensure_runtime_dependencies
-  resolve_source
+  _asryx_install_runtime_dependencies
   build_asryx
 
   local whisper_sha=""
