@@ -152,7 +152,15 @@ void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid
     std::ifstream file(out_txt);
     std::string transcript((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
-    engine::copy_to_clipboard(trim(transcript));
+
+    auto output = trim(transcript);
+    if (output.empty()) {
+      engine::send_notification("no output");
+      clean_stale_payload(runtime_dir);
+      return;
+    }
+
+    engine::copy_to_clipboard(output);
     engine::send_notification("copied to clipboard");
     clean_stale_payload(runtime_dir);
     return;
