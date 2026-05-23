@@ -2,19 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - "**.txt"
-      - "LICENSE"
+    branches:
+      - main
 
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "README.md"
-      - "**.txt"
-      - "LICENSE"
 
 concurrency:
   group: CI-${{ github.ref }}
