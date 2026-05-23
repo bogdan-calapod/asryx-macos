@@ -164,7 +164,7 @@ cd asryx && bash ./scripts/bootstrap
 
 Dependencies are installed automatically on **Debian/Ubuntu** (apt), **Fedora** (dnf), and **Arch-based** (pacman) systems.
 
-If you're not on a supported distro, ensure the following core tools are installed before rerunning the bootstrap script:
+If you're not on a supported distro, ensure the following tools are installed before rerunning the bootstrap script:
 
 Core Utilities:
 
@@ -182,13 +182,11 @@ Build Tools:
 
 Audio Capture:
 
-- `pw-record` (PipeWire)
-- `arecord` (ALSA fallback)
+- `pw-record` (PipeWire) or `arecord` (ALSA fallback)
 
 Clipboard & Alerts:
 
-- `wl-copy` (Wayland)
-- `xclip` (X11 fallback)
+- `wl-copy` (Wayland) or `xclip` (X11 fallback).
 - `notify-send`
 
 > [!IMPORTANT]
@@ -395,10 +393,6 @@ If unavailable, it falls back to ALSA.
 ```text
 arecord
 ```
-
-## Having trouble?
-
-Open an issue.
 
 ## License
 
