@@ -1,7 +1,6 @@
 name: runtime safety
 
 on:
-  workflow_dispatch:
   workflow_call:
 
 permissions:

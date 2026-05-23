@@ -1,7 +1,6 @@
 name: shellcheck
 
 on:
-  workflow_dispatch:
   workflow_call:
 
 permissions:

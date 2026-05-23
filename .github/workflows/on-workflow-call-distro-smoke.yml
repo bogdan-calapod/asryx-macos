@@ -1,7 +1,6 @@
 name: distro smoke
 
 on:
-  workflow_dispatch:
   workflow_call:
 
 permissions:
