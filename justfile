@@ -9,13 +9,14 @@ alias sc := shellcheck
 alias r := runtime-safety-check
 alias c := clean
 
+cpp_sources := "find src tests -type f \\( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \\) -print0"
+tidy_sources := "find src tests -type f \\( -name '*.cpp' -o -name '*.hpp' \\) -print0"
 
 @format:
-	scripts/fmt --fix
+	{{cpp_sources}} | xargs -0 -r clang-format -i
 
 @format-check:
-	scripts/fmt --check
-
+	{{cpp_sources}} | xargs -0 -r clang-format --dry-run --Werror
 
 @test:
 	just build
@@ -23,10 +24,14 @@ alias c := clean
 
 @lint:
 	cmake --fresh --preset release
-	scripts/lint
+	python3 scripts/checks/check-line-limits.py
+	python3 scripts/checks/check-module-boundaries.py
+	python3 scripts/checks/check-owned-paths.py
+	{{tidy_sources}} | xargs -0 -r clang-tidy -p build/release
+	cppcheck --enable=all --error-exitcode=1 --inline-suppr --suppress=checkersReport --suppress=missingInclude --suppress=normalCheckLevelMaxBranches --suppressions-list=cppcheck.suppressions -I . --project=build/release/compile_commands.json
 
 @shellcheck:
-	scripts/shellcheck
+	shellcheck -x scripts/bootstrap scripts/install-dev-deps scripts/uninstall scripts/lib/_common.sh scripts/lib/_deps.sh
 
 @build:
 	cmake --fresh --preset release
@@ -39,7 +44,6 @@ alias c := clean
 	cmake --fresh --preset ubsan
 	cmake --build --preset ubsan
 	ctest --preset ubsan
-
 
 @clean:
 	rm -rf build .cache .asryx-test-home .asryx-test-runtime
