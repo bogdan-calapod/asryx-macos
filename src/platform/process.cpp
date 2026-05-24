@@ -2,18 +2,25 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <csignal>
-#include <cstring>
 #include <fcntl.h>
 #include <iterator>
+#include <string>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <unordered_map>
 
 namespace platform {
 
 bool command_exists(const std::string& name)
 {
+  static std::unordered_map<std::string, bool> cache;
+
+  auto cached = cache.find(name);
+  if (cached != cache.end()) {
+    return cached->second;
+  }
+
   pid_t pid = fork();
   if (pid == 0) {
     int devnull = open("/dev/null", O_WRONLY);
@@ -25,12 +32,18 @@ bool command_exists(const std::string& name)
     execlp("which", "which", name.c_str(), nullptr);
     _exit(127);
   }
+
   if (pid < 0) {
+    cache[name] = false;
     return false;
   }
+
   int status = 0;
   waitpid(pid, &status, 0);
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+
+  const bool found = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  cache[name] = found;
+  return found;
 }
 
 namespace {
@@ -49,6 +62,28 @@ std::vector<char*> build_argv(const std::vector<std::string>& argv)
   return c_argv;
 }
 
+void redirect_stdout_to_devnull()
+{
+  int fd = open("/dev/null", O_WRONLY);
+  if (fd != -1) {
+    dup2(fd, STDOUT_FILENO);
+    close(fd);
+  }
+}
+
+void redirect_stderr_to_file(const std::string& path)
+{
+  if (path.empty()) {
+    return;
+  }
+
+  int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd != -1) {
+    dup2(fd, STDERR_FILENO);
+    close(fd);
+  }
+}
+
 } // namespace
 
 pid_t spawn_process_background(const std::vector<std::string>& argv,
@@ -64,13 +99,9 @@ pid_t spawn_process_background(const std::vector<std::string>& argv,
   }
 
   if (pid == 0) {
-    if (!redirect_file.empty()) {
-      int fd = open(redirect_file.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-      if (fd != -1) {
-        dup2(fd, STDERR_FILENO);
-        close(fd);
-      }
-    }
+    redirect_stdout_to_devnull();
+    redirect_stderr_to_file(redirect_file);
+
     auto c_argv = build_argv(argv);
     execvp(c_argv[0], c_argv.data());
     _exit(127);
@@ -106,11 +137,6 @@ bool run_process_blocking(const std::vector<std::string>& argv)
   return wait_process(pid) == 0;
 }
 
-bool run_process_foreground(const std::vector<std::string>& argv)
-{
-  return run_process_blocking(argv);
-}
-
 bool run_process_with_stdin(const std::vector<std::string>& argv, const std::string& input)
 {
   if (argv.empty()) {
@@ -133,6 +159,7 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
     close(pipe_fds[1]);
     dup2(pipe_fds[0], STDIN_FILENO);
     close(pipe_fds[0]);
+
     auto c_argv = build_argv(argv);
     execvp(c_argv[0], c_argv.data());
     _exit(127);
@@ -142,16 +169,18 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
 
   const char* ptr = input.data();
   size_t remaining = input.size();
+
   while (remaining > 0) {
     ssize_t written = write(pipe_fds[1], ptr, remaining);
     if (written <= 0) {
       break;
     }
+
     ptr += static_cast<size_t>(written);
     remaining -= static_cast<size_t>(written);
   }
-  close(pipe_fds[1]);
 
+  close(pipe_fds[1]);
   return wait_process(pid) == 0;
 }
 
@@ -160,6 +189,7 @@ bool is_process_running(pid_t pid)
   if (pid <= 0) {
     return false;
   }
+
   return kill(pid, 0) == 0;
 }
 
@@ -168,6 +198,7 @@ bool stop_process(pid_t pid, int sig)
   if (pid <= 0) {
     return false;
   }
+
   return kill(pid, sig) == 0;
 }
 

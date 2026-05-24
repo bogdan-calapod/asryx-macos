@@ -5,7 +5,6 @@
 #include "platform/process.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -23,11 +22,6 @@ std::filesystem::path model_dir()
 
 std::filesystem::path whisper_source_dir()
 {
-  const char* env_dir = std::getenv("ASRYX_WHISPER_SOURCE_DIR");
-  if (env_dir != nullptr && *env_dir != '\0') {
-    return {env_dir};
-  }
-
   return platform::get_home_relative_path(".local/opt/whisper.cpp");
 }
 
@@ -76,7 +70,7 @@ void run_whisper_model_downloader(const std::string& name)
 
   if (!std::filesystem::exists(source_dir / ".git")) {
     throw std::runtime_error("missing whisper.cpp checkout: " + source_dir.string() +
-                             ". Run ./bootstrap first.");
+                             ". Run ./scripts/install first.");
   }
 
   if (!std::filesystem::exists(downloader)) {
@@ -86,7 +80,7 @@ void run_whisper_model_downloader(const std::string& name)
   std::cout << "Downloading model " << name << " via whisper.cpp downloader...\n";
 
   const std::string script = R"(cd "$1" && bash ./models/download-ggml-model.sh "$2")";
-  const bool success = platform::run_process_foreground(
+  const bool success = platform::run_process_blocking(
       {"bash", "-c", script, "asryx-model-download", source_dir.string(), name});
 
   if (!success) {

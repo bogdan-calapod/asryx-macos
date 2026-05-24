@@ -12,7 +12,9 @@ runs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           ca-certificates \
-          just \
+          bash \
+          git \
+          curl \
           cmake \
           ninja-build \
           build-essential \
@@ -22,5 +24,12 @@ runs:
           clang-tidy \
           cppcheck \
           python3 \
-          shellcheck
+          shellcheck \
+          just \
+          coreutils \
+          pipewire \
+          alsa-utils \
+          wl-clipboard \
+          xclip \
+          libnotify-bin
         sudo rm -rf /var/lib/apt/lists/*

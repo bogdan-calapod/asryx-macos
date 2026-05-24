@@ -26,9 +26,11 @@
 
 <br/>
 
-Voice is always faster than typing. The problem is everything built around it: hold a key (pessimal), open a (bloated) app, pick a provider/model (decision fatigue), send audio to a server (privacy), wait for a response (speed), hope the network holds (unreliable).
+Voice is always faster than typing, it's supposed to be instant.
 
-It's supposed to be instant, not a dependency chain with a mic attached.
+The problem is everything built around the tooling: hold a key (pessimal), open an app (bloated), pick a provider/model (decision fatigue), send audio to a server (privacy), wait for a response (speed), hope the network holds (unreliable).
+
+Basically dependency hell.
 
 </details>
 
@@ -37,7 +39,9 @@ It's supposed to be instant, not a dependency chain with a mic attached.
 
 <br/>
 
-Asryx is a lightweight native Linux voice-to-text toggle.
+A lightweight native Linux voice-to-text toggle. Does one thing, and does it well. You compile it on your own machine.
+
+The way it works is:
 
 Press once to record. Talk as long as you want. Press again to stop, it transcribes locally, copies the text to your clipboard, notifies you, and cleans up.
 
@@ -59,13 +63,9 @@ You paste the text anywhere.
 
 That's it.
 
-```text
-record -> stop -> transcribe -> copy -> notify -> clean
-```
+Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it **won't** spawn five recorders or corrupt the active transcription.
 
-Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it won' spawn five recorders or corrupt the active transcription.
-
-Also, the temporary audio and transcript files are cleaned after the run.
+Also, the temporary audio is cleaned after the run. The transcript is copied from memory into the clipboard.
 
 You might also want to keybind it, for example, on Hyprland:
 
@@ -73,7 +73,7 @@ You might also want to keybind it, for example, on Hyprland:
 bind = ALT, W, exec, asryx
 ```
 
-Also, make sure you se a clipboard manager, so the transcript is recoverable if you accidentally copy something else after a long recording.
+Also, make sure you **set** a clipboard manager, so the transcript is recoverable if you accidentally copy something else after a long recording.
 
 </details>
 
@@ -92,11 +92,11 @@ No cloud. No GUI(s). No Python env hell. No background daemon(s). No dashboard(s
 
 <br/>
 
-The binary wraps `whisper.cpp` with a native Linux runtime. The model inference is `whisper-cli`.
+The binary embeds `whisper.cpp` inside a native Linux runtime.
 
-Asryx owns everything around it: recording lifecycle, toggle state, locking, model lookup, clipboard, notifications, cleanup.
+Asryx owns everything around it: recording lifecycle, toggle state, locking, model lookup, local inference, clipboard, notifications, cleanup.
 
-The installer builds [whisper.cpp](https://github.com/ggml-org/whisper.cpp) from source on your machine using your system compiler, you get a single native binary that runs directly on your CPU.
+The installer clones the pinned [whisper.cpp](https://github.com/ggml-org/whisper.cpp) source into `~/.local/opt/whisper.cpp`, then builds `asryx` against it on your machine. Transcription happens inside the `asryx` process through the `whisper.cpp` library API.
 
 ```text
 press
@@ -106,16 +106,16 @@ press
 
 press again
   -> stop recorder
-  -> run whisper-cli on the wav
-  -> read transcript
-  -> copy to clipboard
+  -> read the wav
+  -> run whisper.cpp in-process
+  -> copy transcript to clipboard
   -> notify
   -> clean runtime files
 ```
 
 The first press starts the recorder. PipeWire through `pw-record` is preferred, falls back to ALSA through `arecord`. Audio is captured as a temporary WAV file: mono, 16 kHz, signed 16-bit.
 
-The second press stops the recorder by signal, waits for the WAV to finalize, trims the edges, and pushes it into the clipboard.
+The second press stops the recorder by signal, waits for the WAV to finalize, decodes it into memory, runs local inference through `whisper.cpp`, trims the transcript, and pushes it into the clipboard.
 
 Clipboard output:
 
@@ -148,10 +148,9 @@ rec.pid
 rec.wav
 rec.err
 state
-out.txt
 ```
 
-After a successful transcription, all of it is deleted. The transcript survives only through your clipboard.
+After a successful transcription, all of it is deleted. The transcript survives only through the clipboard.
 
 </details>
 
@@ -159,20 +158,19 @@ After a successful transcription, all of it is deleted. The transcript survives 
 
 ```bash
 git clone https://github.com/rccyx/asryx
-cd asryx && bash ./scripts/bootstrap
+cd asryx && bash ./scripts/install
 ```
 
-Dependencies are installed automatically on **Debian/Ubuntu** (apt), **Fedora** (dnf), and **Arch-based** (pacman) systems.
+The install script does not install system packages. It checks that the required tools exist and exits with a missing-tool list if the machine is not ready.
 
-If you're not on a supported distro, ensure the following tools are installed before rerunning the bootstrap script:
+Ensure these utilities are installed before running the script:
 
 Core Utilities:
 
 - bash
 - git
-- ca-certificates
 - curl
-- sha256sum
+- install
 
 Build Tools:
 
@@ -200,12 +198,11 @@ Clipboard & Alerts:
 It runs in this order.
 
 - validates your home directory
-- installs missing build dependencies on supported distros
-- builds the native binary locally
+- checks required tools
+- clones or updates the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
+- builds the native binary locally against `whisper.cpp`
 - installs `asryx` into `~/.local/bin/asryx`
-- clones the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
-- builds `whisper-cli`
-- installs `whisper-cli` into `~/.local/bin/whisper-cli`
+- writes the installed `whisper.cpp` pin
 - writes the default config if missing
 - installs the default model
 - selects the default model
@@ -223,7 +220,6 @@ The install uses:
 
 ```text
 ~/.local/bin/asryx
-~/.local/bin/whisper-cli
 ~/.local/opt/whisper.cpp
 ~/.local/share/asryx
 ~/.local/share/asryx/versions/whisper-cpp-sha
@@ -254,11 +250,10 @@ Outputs: (idle, recording, or transcribing)
 
 <br/>
 
-It removes Asryx-owned files.
+It removes asryx owned files.
 
 ```text
 ~/.local/bin/asryx
-~/.local/bin/whisper-cli
 ~/.local/opt/asryx
 ~/.local/opt/whisper.cpp
 ~/.local/share/asryx
@@ -341,12 +336,9 @@ Models ending in `.en` are English-only. All others are multilingual.
 | large-v3-turbo     | 1.5 GiB | ~2.3 GB | ~8x            |
 | large-v1 / v2 / v3 | 2.9 GiB | ~3.9 GB | 1x             |
 
-Speed is relative to large on CPU. RAM figures are whisper.cpp runtime.
+Speed is relative to large on CPU.
 
 `base.en` is the default. It covers most use cases and starts fast.
-
-> [!TIP]
-> `large-v3-turbo` is the best upgrade: near-large accuracy at roughly small-level speed, for about the same disk cost as `medium`.
 
 Installed models live in:
 

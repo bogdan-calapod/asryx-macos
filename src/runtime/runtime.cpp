@@ -63,9 +63,32 @@ void clean_stale_payload(const std::filesystem::path& runtime_dir)
 {
   platform::safe_delete_file(runtime_dir / "rec.pid");
   platform::safe_delete_file(runtime_dir / "rec.wav");
+  platform::safe_delete_file(runtime_dir / "rec.raw");
   platform::safe_delete_file(runtime_dir / "rec.err");
   platform::safe_delete_file(runtime_dir / "state");
   platform::safe_delete_file(runtime_dir / "out.txt");
+}
+
+std::string read_text_file(const std::filesystem::path& path)
+{
+  if (!std::filesystem::exists(path)) {
+    return "";
+  }
+
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    return "";
+  }
+
+  std::string output;
+  std::string line;
+
+  while (std::getline(file, line)) {
+    output += line;
+    output += '\n';
+  }
+
+  return output;
 }
 
 std::string read_state_file(const std::filesystem::path& runtime_dir)
@@ -115,6 +138,14 @@ void write_state(const std::filesystem::path& runtime_dir, const std::string& st
   file << state << "\n";
 }
 
+void print_recorder_error(const std::filesystem::path& runtime_dir)
+{
+  auto error = trim(read_text_file(runtime_dir / "rec.err"));
+  if (!error.empty()) {
+    std::cerr << error << "\n";
+  }
+}
+
 void start_recording(const std::filesystem::path& runtime_dir)
 {
   clean_stale_payload(runtime_dir);
@@ -138,35 +169,27 @@ void start_recording(const std::filesystem::path& runtime_dir)
 
 void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid)
 {
+  if (!engine::stop_recording(rec_pid)) {
+    print_recorder_error(runtime_dir);
+    engine::send_notification("recorder did not stop");
+    return;
+  }
+
   write_state(runtime_dir, "transcribing");
-  engine::stop_recording(rec_pid);
 
   auto cfg = config::load_config();
   auto model_path = model::get_model_path(cfg.model);
   auto wav_path = runtime_dir / "rec.wav";
-  auto out_prefix = runtime_dir / "out";
-  auto out_txt = runtime_dir / "out.txt";
+  auto output = trim(engine::transcribe(model_path, wav_path.string(), cfg.language));
 
-  bool success = engine::run_whisper(model_path, wav_path.string(), out_prefix.string());
-  if (success && std::filesystem::exists(out_txt)) {
-    std::ifstream file(out_txt);
-    std::string transcript((std::istreambuf_iterator<char>(file)),
-                           std::istreambuf_iterator<char>());
-
-    auto output = trim(transcript);
-    if (output.empty()) {
-      engine::send_notification("no output");
-      clean_stale_payload(runtime_dir);
-      return;
-    }
-
-    engine::copy_to_clipboard(output);
-    engine::send_notification("copied to clipboard");
+  if (output.empty()) {
+    engine::send_notification("no output");
     clean_stale_payload(runtime_dir);
     return;
   }
 
-  engine::send_notification("transcription failed");
+  engine::copy_to_clipboard(output);
+  engine::send_notification("copied to clipboard");
   clean_stale_payload(runtime_dir);
 }
 
@@ -209,6 +232,7 @@ void toggle()
   }
   catch (const std::exception& e) {
     std::cerr << "error: " << e.what() << "\n";
+    print_recorder_error(runtime_dir);
     clean_stale_payload(runtime_dir);
     release_lock(runtime_dir);
     std::exit(1);
