@@ -22,16 +22,23 @@ jobs:
     uses: ./.github/workflows/on-workflow-call-format.yml
 
   lint:
+    needs: [shellcheck, format]
     uses: ./.github/workflows/on-workflow-call-lint.yml
 
   build:
+    needs: [lint]
     uses: ./.github/workflows/on-workflow-call-build.yml
 
   test:
+    needs:
+      - build
     uses: ./.github/workflows/on-workflow-call-test.yml
 
-  runtime-safety:
-    uses: ./.github/workflows/on-workflow-call-runtime-safety.yml
+  sanitizers:
+    needs:
+      - build
+    uses: ./.github/workflows/on-workflow-call-sanitizers.yml
 
-  distro-smoke:
-    uses: ./.github/workflows/on-workflow-call-distro-smoke.yml
+  install-uninstall:
+    needs: [build, sanitizers]
+    uses: ./.github/workflows/on-workflow-call-distros.yml

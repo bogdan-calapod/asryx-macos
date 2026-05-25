@@ -1,6 +1,6 @@
 <div align="center">
 
-# A S R Y X
+# asryx
 
 <br/>
 
@@ -8,12 +8,12 @@
   <a href="https://github.com/rccyx/asryx/actions"><img src="https://img.shields.io/github/actions/workflow/status/rccyx/asryx/ci.yml?style=for-the-badge&color=black&labelColor=111111&logo=githubactions&logoColor=white" alt="CI Status"/></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Platform-Linux-black?style=for-the-badge&color=black&labelColor=111111&logo=linux&logoColor=white" alt="Platform: Linux"/></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Offline-No_Cloud-black?style=for-the-badge&color=black&labelColor=111111" alt="Offline"/></a>
-  <a href="https://github.com/rccyx/asryx/blob/main/LICENSE"><img src="https://img.shields.io/github/license/rccyx/asryx?style=for-the-badge&color=black&labelColor=111111&logo=apache&logoColor=white" alt="License"/></a>
+  <a href="https://github.com/rccyx/osyx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache-black?style=for-the-badge&color=black&labelColor=111111&logo=apache&logoColor=white" alt="License"/></a>
 </p>
 
 </div>
 
-## Overview
+## Demo
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=lVDFpoCkvh8">

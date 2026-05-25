@@ -6,7 +6,7 @@ alias l := lint
 alias b := build
 alias t := test
 alias sc := shellcheck
-alias r := runtime-safety-check
+alias s := sanitizers
 alias c := clean
 
 cpp_sources := "find src tests -type f \\( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \\) -print0"
@@ -37,7 +37,7 @@ tidy_sources := "find src tests -type f \\( -name '*.cpp' -o -name '*.hpp' \\) -
 	cmake --fresh --preset release
 	cmake --build --preset release
 
-@runtime-safety-check:
+@sanitizers:
 	cmake --fresh --preset asan
 	cmake --build --preset asan
 	ctest --preset asan

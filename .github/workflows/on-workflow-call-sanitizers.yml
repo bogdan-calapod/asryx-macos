@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  runtime-safety:
+  sanitizers:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
@@ -20,4 +20,4 @@ jobs:
         run: bash ./scripts/install
 
       - name: runtime safety
-        run: just r
+        run: just s
