@@ -77,7 +77,7 @@ Also, make sure you **set** a clipboard manager, so the transcript is recoverabl
 
 Basically UX: One command to install. Works immediately after. But most importantly:
 
-No cloud. No GUI(s). No Python env hell. No background daemon(s). No dashboard(s). No container(s). No subscription(s), no persistent key pressing, no choose from these 965 models you'll never use, no do these 22 steps first and maybe it works. No Node, no Python again.
+No cloud. No GUI(s). No Python env hell. No background daemon(s). No systemd, No dashboard(s). No container(s). No subscription(s), no persistent key pressing, no choose from these 965 models you'll never use, no do these 22 steps first and maybe it works. No Node, no Python again.
 
 </details>
 
@@ -86,9 +86,9 @@ No cloud. No GUI(s). No Python env hell. No background daemon(s). No dashboard(s
 
 <br/>
 
-The binary links against `whisper.cpp` as a library and runs transcription in-process, no subprocess, no server, nothing leaving your machine.
+You compile a final asryx binary on your machine that links against `whisper.cpp` as a library and runs transcription in-process, no subprocess, no server, nothing leaving your machine.
 
-Asryx owns everything around it: recording lifecycle, toggle state, locking, model lookup, local inference, clipboard, notifications, cleanup.
+The binary owns everything around it: recording lifecycle, toggle state, locking, model lookup, local inference, clipboard, notifications, cleanup.
 
 The installer clones the pinned [whisper.cpp](https://github.com/ggml-org/whisper.cpp) source into `~/.local/opt/whisper.cpp`, then builds `asryx` against it on your machine. Transcription happens inside the `asryx` process through the `whisper.cpp` library API.
 
@@ -117,7 +117,7 @@ The first press starts the recorder. PipeWire through `pw-record` is preferred, 
 
 The second press stops the recorder by signal, waits for the process to exit, decodes the WAV into memory as float samples, and runs local inference through `whisper.cpp`. The transcript is trimmed and pushed into the clipboard. If nothing was transcribed, it notifies and cleans up without touching the clipboard.
 
-Language: if the active model is English only (e.g. `base.en`), English is always used regardless of config. If the model is multilingual and `language` is set to `auto`, Whisper detects the spoken language automatically. Otherwise the configured language code is passed directly to the model.
+Language is validated before recording starts. `auto` keeps Whisper language detection enabled. A supported language code locks transcription to that language. English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept `auto` or `en`. Multilingual models accept `auto` and every supported language code.
 
 Clipboard output:
 
@@ -163,28 +163,41 @@ git clone https://github.com/rccyx/asryx
 cd asryx && bash ./scripts/install
 ```
 
-Ensure these utilities are installed before running the script:
+This is just C++ and standard Linux, nothing exotic, so ensure these utilities are installed before running the installer (you probably have them already):
 
-Core Utilities:
+**Core Utilities:**
 
 - bash
 - git
 - curl
 - install
 
-Build Tools:
+**Build Tools:**
 
 - cmake
 - ninja
 - a C++ compiler (`g++` or `clang++`)
 
-Audio Capture:
+**Audio Capture:**
 
 - `pw-record` (PipeWire) or `arecord` (ALSA fallback)
 
-Clipboard & Alerts:
+To check what's your audio backend:
+
+```
+which pw-record || which arecord
+```
+
+**Clipboard & Alerts:**
 
 - `wl-copy` (Wayland) or `xclip` (X11 fallback).
+
+To check what your window manager:
+
+```
+echo $XDG_SESSION_TYPE
+```
+
 - `notify-send`
 
 > [!IMPORTANT]
@@ -199,7 +212,7 @@ It runs in this order.
 
 - validates your home directory
 - checks required tools
-- clones or updates the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
+- clones the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
 - builds the native binary locally against `whisper.cpp`
 - installs `asryx` into `~/.local/bin/asryx`
 - writes the installed `whisper.cpp` pin
@@ -270,18 +283,19 @@ It refuses dangerous paths such as `/`, `$HOME`, empty paths, and non-absolute p
 
 ## CLI
 
-The surface area is tiny:
+The surface area:
 
 ```
 asryx
 asryx status
+asryx --language <auto|<CODE>>
 asryx --model list
 asryx --model install <MODEL>
 asryx --model use <MODEL>
 asryx --model uninstall <MODEL>
 ```
 
-## Models
+### Usage
 
 List models.
 
@@ -358,24 +372,141 @@ The active model config is stored in:
 ~/.asryx.conf
 ```
 
-## Config
-
 Switching models through the CLI updates this file.
 
 ```bash
 asryx --model use small.en
 ```
 
+Switching language through the CLI updates the same file and preserves the active model.
+
+```bash
+asryx --language es
+asryx --language auto
+```
+
 You can also edit it manually.
 
 ```bash
-model=small.en
-language=auto
+model=base
+language=de
 ```
 
 `model` sets the active Whisper model. `language` controls what language the model transcribes in.
 
-Set `language` to any Whisper supported language code (e.g. `fr`, `de`, `ar`, `zh`) or leave it as `auto` to let the model detect the spoken language automatically. Setting it explicitly is a bit faster, `auto` makes Whisper spend time figuring out the language before it can transcribe.
+`auto` keeps automatic language detection. A language code locks transcription to that language. Invalid language values fail before recording starts.
+
+English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept `auto` or `en`, multilingual models accept every supported code.
+
+<details>
+<summary>Supported language codes</summary>
+
+<br/>
+
+| Code | Language       |
+| ---- | -------------- |
+| en   | english        |
+| zh   | chinese        |
+| de   | german         |
+| es   | spanish        |
+| ru   | russian        |
+| ko   | korean         |
+| fr   | french         |
+| ja   | japanese       |
+| pt   | portuguese     |
+| tr   | turkish        |
+| pl   | polish         |
+| ca   | catalan        |
+| nl   | dutch          |
+| ar   | arabic         |
+| sv   | swedish        |
+| it   | italian        |
+| id   | indonesian     |
+| hi   | hindi          |
+| fi   | finnish        |
+| vi   | vietnamese     |
+| he   | hebrew         |
+| uk   | ukrainian      |
+| el   | greek          |
+| ms   | malay          |
+| cs   | czech          |
+| ro   | romanian       |
+| da   | danish         |
+| hu   | hungarian      |
+| ta   | tamil          |
+| no   | norwegian      |
+| th   | thai           |
+| ur   | urdu           |
+| hr   | croatian       |
+| bg   | bulgarian      |
+| lt   | lithuanian     |
+| la   | latin          |
+| mi   | maori          |
+| ml   | malayalam      |
+| cy   | welsh          |
+| sk   | slovak         |
+| te   | telugu         |
+| fa   | persian        |
+| lv   | latvian        |
+| bn   | bengali        |
+| sr   | serbian        |
+| az   | azerbaijani    |
+| sl   | slovenian      |
+| kn   | kannada        |
+| et   | estonian       |
+| mk   | macedonian     |
+| br   | breton         |
+| eu   | basque         |
+| is   | icelandic      |
+| hy   | armenian       |
+| ne   | nepali         |
+| mn   | mongolian      |
+| bs   | bosnian        |
+| kk   | kazakh         |
+| sq   | albanian       |
+| sw   | swahili        |
+| gl   | galician       |
+| mr   | marathi        |
+| pa   | punjabi        |
+| si   | sinhala        |
+| km   | khmer          |
+| sn   | shona          |
+| yo   | yoruba         |
+| so   | somali         |
+| af   | afrikaans      |
+| oc   | occitan        |
+| ka   | georgian       |
+| be   | belarusian     |
+| tg   | tajik          |
+| sd   | sindhi         |
+| gu   | gujarati       |
+| am   | amharic        |
+| yi   | yiddish        |
+| lo   | lao            |
+| uz   | uzbek          |
+| fo   | faroese        |
+| ht   | haitian creole |
+| ps   | pashto         |
+| tk   | turkmen        |
+| nn   | nynorsk        |
+| mt   | maltese        |
+| sa   | sanskrit       |
+| lb   | luxembourgish  |
+| my   | myanmar        |
+| bo   | tibetan        |
+| tl   | tagalog        |
+| mg   | malagasy       |
+| as   | assamese       |
+| tt   | tatar          |
+| haw  | hawaiian       |
+| ln   | lingala        |
+| ha   | hausa          |
+| ba   | bashkir        |
+| jw   | javanese       |
+| su   | sundanese      |
+| yue  | cantonese      |
+
+</details>
 
 ## Audio
 
