@@ -7,119 +7,86 @@
 <p align="center">
   <a href="https://github.com/rccyx/asryx/actions"><img src="https://img.shields.io/github/actions/workflow/status/rccyx/asryx/ci.yml?style=for-the-badge&color=black&labelColor=111111&logo=githubactions&logoColor=white" alt="CI Status"/></a>
   <a href="#installation"><img src="https://img.shields.io/badge/Platform-Linux-black?style=for-the-badge&color=black&labelColor=111111&logo=linux&logoColor=white" alt="Platform: Linux"/></a>
-  <a href="#installation"><img src="https://img.shields.io/badge/Offline-No_Cloud-black?style=for-the-badge&color=black&labelColor=111111" alt="Offline"/></a>
-  <a href="https://github.com/rccyx/osyx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache-black?style=for-the-badge&color=black&labelColor=111111&logo=apache&logoColor=white" alt="License"/></a>
+  <a href="#runtime-model"><img src="https://img.shields.io/badge/Offline-No_Cloud-black?style=for-the-badge&color=black&labelColor=111111" alt="Offline"/></a>
+  <a href="https://github.com/rccyx/asryx/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache-black?style=for-the-badge&color=black&labelColor=111111&logo=apache&logoColor=white" alt="License"/></a>
 </p>
 
 </div>
 
-## Demo
-
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=lVDFpoCkvh8">
+  <a href="./assets/demo.gif">
     <img src="./assets/demo.gif" alt="asryx demo" width="100%">
   </a>
 </p>
 
-<details>
-<summary><strong>Why?</strong></summary>
+## Overview
 
-<br/>
+asryx is a native C++ ASR binary for Linux. It builds locally against a pinned `whisper.cpp` source tree, records audio through the active Linux audio stack, runs recognition in-process, writes the transcript to the active clipboard backend, emits desktop notifications, and removes runtime artifacts after completion. Easily installed, and more easily removed.
 
-Voice is always faster than typing, it's supposed to be instant.
+Uses standard C++ and Linux dependencies, so it works with any Linux machine. Links against `whisper.cpp` as an embedded library through it's public C compatible API. There is no ASR server, hosted API, Python runtime, Node runtime, container layer, resident daemon, GUI process, dashboard, subscription, or network dependency during transcription.
 
-The problem is everything built around the tooling: hold a key (pessimal), open an app (bloated), pick a provider/model (decision fatigue), send audio to a server (privacy), wait for a response (speed), hope the network holds (unreliable).
-
-</details>
-
-<details>
-<summary><strong>What?</strong></summary>
-
-<br/>
-
-The way it works is:
-
-Press once to record. Talk as long as you want. Press again to stop, it transcribes locally, copies the text to your clipboard, notifies you, and cleans up.
+The program is basically a toggle, and a very simple [CLI](#cli).
 
 ```bash
 asryx
 ```
 
-It pushes a notification saying "recording..."
-
-You speak.
+The first invocation starts capture.
 
 ```bash
 asryx
 ```
 
-Says "copied to clipboard"
+The next invocation stops capture, transcribes locally, copies the transcript, notifies the session, and cleans the runtime directory.
 
-You paste the text anywhere. That's it.
+A compositor double-fire, key repeat, or repeated invocation during an active phase cannot create parallel recorders or corrupt the current transcription.
 
-Repeated key presses are safe. If a compositor double-fires the keybind or the key repeats, it **won't** spawn five recorders or corrupt the active transcription.
-
-Also, the temporary audio is cleaned after the run. The transcript is copied from memory into the clipboard.
-
-You might also want to keybind it, for example, on Hyprland:
-
-```ini
-bind = ALT, W, exec, asryx
-```
-
-Also, make sure you **set** a clipboard manager, so the transcript is recoverable if you accidentally copy something else after a long recording.
-
-</details>
-
-<details>
-<summary><strong>How is this different?</strong></summary>
-<br/>
-
-Basically UX: One command to install. Works immediately after. But most importantly:
-
-No cloud. No GUI(s). No Python env hell. No background daemon(s). No systemd, No dashboard(s). No container(s). No subscription(s), no persistent key pressing, no choose from these 965 models you'll never use, no do these 22 steps first and maybe it works. No Node, no Python again.
-
-</details>
-
-<details>
-<summary><strong>How it works?</strong></summary>
-
-<br/>
-
-You compile a final asryx binary on your machine that links against `whisper.cpp` as a library and runs transcription in-process, no subprocess, no server, nothing leaving your machine.
-
-The binary owns everything around it: recording lifecycle, toggle state, locking, model lookup, local inference, clipboard, notifications, cleanup.
-
-The installer clones the pinned [whisper.cpp](https://github.com/ggml-org/whisper.cpp) source into `~/.local/opt/whisper.cpp`, then builds `asryx` against it on your machine. Transcription happens inside the `asryx` process through the `whisper.cpp` library API.
+**Runtime model:**
 
 ```text
 press
-  -> acquire lock (prevents double invocation)
+  -> acquire lock
   -> start local recorder
   -> write recorder pid
   -> mark state as recording
-  -> notify "recording..."
+  -> notify
 
 press again
   -> acquire lock
-  -> stop recorder (SIGINT, escalates to SIGTERM then SIGKILL if needed)
+  -> stop recorder
   -> mark state as transcribing
   -> decode wav into memory
-  -> run whisper.cpp in-process
+  -> run whisper.cpp inference in-process
   -> trim transcript
-  -> copy to clipboard
-  -> notify "copied to clipboard"
-  -> clean runtime files
+  -> write transcript to clipboard
+  -> notify
+  -> remove runtime files
   -> release lock
 ```
 
-The first press starts the recorder. PipeWire through `pw-record` is preferred, falls back to ALSA through `arecord`. Audio is captured as a temporary WAV file: mono, 16 kHz, signed 16-bit.
+Audio capture prefers PipeWire:
 
-The second press stops the recorder by signal, waits for the process to exit, decodes the WAV into memory as float samples, and runs local inference through `whisper.cpp`. The transcript is trimmed and pushed into the clipboard. If nothing was transcribed, it notifies and cleans up without touching the clipboard.
+```text
+pw-record
+```
 
-Language is validated before recording starts. `auto` keeps Whisper language detection enabled. A supported language code locks transcription to that language. English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept `auto` or `en`. Multilingual models accept `auto` and every supported language code.
+ALSA is used as fallback:
 
-Clipboard output:
+```text
+arecord
+```
+
+Captured audio is written as a temporary WAV file:
+
+```text
+mono
+16 kHz
+signed 16-bit
+```
+
+The second invocation stops the recorder by signal, waits for the recorder process to exit, decodes the WAV into memory as float samples, runs local inference, trims the result, and writes it to the clipboard.
+
+Clipboard backends:
 
 ```text
 wl-copy                     # Wayland
@@ -132,17 +99,21 @@ Notifications:
 notify-send
 ```
 
-The binary emits the event. Mako, Dunst, or your desktop environment displays it.
+Whenever the event is emmited, `notify-send` pipes it to Mako, Dunst, or any active desktop notification daemon to render it.
 
-Runtime state lives under:
+**Runtime state:**
 
 ```text
 $XDG_RUNTIME_DIR/asryx
 ```
 
-Falls back to `/tmp/asryx-$UID` if `$XDG_RUNTIME_DIR` is unavailable.
+If `$XDG_RUNTIME_DIR` is unavailable, falls back to:
 
-The directory holds only temporary payloads:
+```text
+/tmp/asryx-$UID
+```
+
+**Runtime files:**
 
 ```text
 lock/
@@ -152,9 +123,7 @@ rec.err
 state
 ```
 
-After a successful transcription, all of it is deleted. The transcript survives only through the clipboard.
-
-</details>
+After a completed transcription, runtime files are removed. The transcript survives only through the clipboard.
 
 ## Installation
 
@@ -163,167 +132,154 @@ git clone https://github.com/rccyx/asryx
 cd asryx && bash ./scripts/install
 ```
 
-This is just C++ and standard Linux, nothing exotic, so ensure these utilities are installed before running the installer (you probably have them already):
+The installer validates the user environment, checks required tools, clones the pinned source, builds the binary locally, installs the executable, writes the version pin, writes the default config, installs the default model, selects it, and prints a PATH note when `~/.local/bin` is unavailable from the current shell.
 
-**Core Utilities:**
+Installed paths:
 
-- bash
-- git
-- curl
-- install
-
-**Build Tools:**
-
-- cmake
-- ninja
-- a C++ compiler (`g++` or `clang++`)
-
-**Audio Capture:**
-
-- `pw-record` (PipeWire) or `arecord` (ALSA fallback)
-
-To check what's your audio backend:
-
-```
-which pw-record || which arecord
+```text
+~/.local/bin/asryx
+~/.local/opt/whisper.cpp
+~/.local/share/asryx/
+~/.local/share/asryx/versions/whisper-cpp-sha
+~/.asryx.conf
 ```
 
-**Clipboard & Alerts:**
-
-- `wl-copy` (Wayland) or `xclip` (X11 fallback).
-
-To check what your window manager:
-
-```
-echo $XDG_SESSION_TYPE
-```
-
-- `notify-send`
-
-> [!IMPORTANT]
-> To receive visual desktop alerts such as `recording...` or `copied...`, ensure a notification daemon like Mako or Dunst is active.
-
-<details>
-<summary><strong>What the installer does</strong></summary>
-
-<br/>
-
-It runs in this order.
-
-- validates your home directory
-- checks required tools
-- clones the pinned `whisper.cpp` source into `~/.local/opt/whisper.cpp`
-- builds the native binary locally against `whisper.cpp`
-- installs `asryx` into `~/.local/bin/asryx`
-- writes the installed `whisper.cpp` pin
-- writes the default config if missing
-- installs the default model
-- selects the default model
-- prints a PATH note if `~/.local/bin` is not already available
-
-The default model is:
+Default model:
 
 ```text
 base.en
 ```
 
-Models are downloaded through the official `whisper.cpp` model downloader (which is HuggingFace).
+Model downloads pull from [Hugging Face.](https://huggingface.co/ggerganov/whisper.cpp)
 
-The install uses:
+After installation:
 
-```text
-~/.local/bin/asryx
-~/.local/opt/whisper.cpp
-~/.local/share/asryx
-~/.local/share/asryx/versions/whisper-cpp-sha
-~/.asryx.conf
+```bash
+asryx status
 ```
 
-</details>
-
-After installation. You should see the current runtime state.
+Expected output:
 
 ```text
-$ asryx status
 idle
 ```
 
-You can use this if you ever need to know what the engine is currently doing (useful for UI scripts like Polybar or Waybar).
-
-Outputs: (idle, recording, or transcribing)
-
-## Uninstallation
-
-```bash
-./scripts/uninstall
-```
-
-<details>
-<summary><strong>What the uninstaller does</strong></summary>
-
-<br/>
-
-It removes asryx owned files.
+`asryx status` prints one of:
 
 ```text
-~/.local/bin/asryx
-~/.local/opt/asryx
-~/.local/opt/whisper.cpp
-~/.local/share/asryx
-~/.cache/asryx
-~/.asryx.conf
-$XDG_RUNTIME_DIR/asryx
+idle
+recording
+transcribing
 ```
 
-It doesn't remove shared system packages.
+> [!TIP]
+> This output can be used for status surfaces such as Waybar and Polybar.
 
-It refuses dangerous paths such as `/`, `$HOME`, empty paths, and non-absolute paths.
+## Dependencies
 
-</details>
+You probably have most of these already, but check.
+
+Build:
+
+```text
+bash
+git
+curl
+cmake
+ninja
+g++ or clang++
+```
+
+Runtime depends on your machine. For audio, check what you have:
+
+```bash
+which pw-record || which arecord
+```
+
+PipeWire systems have `pw-record`, ALSA systems have `arecord`. If you have neither, install `pipewire` or `alsa-utils` through your package manager.
+
+For clipboard, it depends on your session. Hyprland, Sway, and any other Wayland compositor need `wl-clipboard`. X11 needs `xclip`. If you're not sure which you are on:
+
+```bash
+echo "$XDG_SESSION_TYPE"
+```
+
+Desktop notifications require an active notification daemon such as Mako, Dunst, or the session's native notification service.
+
+## Keybind
+
+The binary takes no arguments to toggle, so just bind it to a key in whatever compositor or DE you're on.
+
+Hyprland:
+
+```ini
+bind = ALT, W, exec, asryx
+```
+
+Sway / i3:
+
+```ini
+bindsym $mod+w exec asryx
+```
+
+GNOME: Settings > Keyboard > Custom Shortcuts, set command to `asryx`.
+
+KDE Plasma: System Settings > Shortcuts > Custom Shortcuts, set command to `asryx`.
+
+> [!TIP]
+> A clipboard manager is highly recommended for long recordings. In case you copy something else by mistake after the transcription is emitted.
 
 ## CLI
 
-The surface area:
+The full surface area:
 
-```
+```text
 asryx
 asryx status
-asryx --language <auto|<CODE>>
+asryx --language <auto|CODE>
 asryx --model list
 asryx --model install <MODEL>
 asryx --model use <MODEL>
 asryx --model uninstall <MODEL>
 ```
 
-### Usage
-
-List models.
+List supported models:
 
 ```bash
 asryx --model list
 ```
 
-Install a model.
+Install a model:
 
 ```bash
 asryx --model install small.en
 ```
 
-Use a model.
+Select a model:
 
 ```bash
 asryx --model use small.en
 ```
 
-Remove a model.
+Remove a model:
 
 ```bash
 asryx --model uninstall small.en
 ```
 
+Set transcription language:
+
+```bash
+asryx --language auto
+asryx --language en
+asryx --language de
+```
+
+## Models
+
 Supported models:
 
-```
+```text
 tiny.en
 tiny
 base.en
@@ -339,8 +295,6 @@ large-v3-turbo
 large
 ```
 
-Models ending in `.en` are English only. All others are multilingual.
-
 | Model              | Disk    | RAM     | Speed vs large |
 | ------------------ | ------- | ------- | -------------- |
 | tiny / tiny.en     | 75 MiB  | ~273 MB | ~10x           |
@@ -352,54 +306,70 @@ Models ending in `.en` are English only. All others are multilingual.
 
 Speed is relative to large on CPU.
 
-`base.en` is the default. It covers most use cases and starts fast.
+`base.en` is the default. It starts quickly and covers the default English offline transcription path.
 
-Installed models live in:
+Installed models live under:
 
-```bash
+```text
 ~/.local/share/asryx/
 ```
 
-For example:
+Example:
 
-```bash
+```text
 ~/.local/share/asryx/ggml-base.en.bin
 ```
 
-The active model config is stored in:
+## Configuration
 
-```bash
+Configuration is stored in:
+
+```text
 ~/.asryx.conf
 ```
 
-Switching models through the CLI updates this file.
+Default:
+
+```text
+model=base.en
+language=auto
+```
+
+`model` selects the active model. `language` controls transcription language. `auto` lets the model detect the language first before transcribing, which adds a little bit of unnecessary latency if you speak the same language all the time. Locking to a language code skips detection and transcribes instantly.
+
+English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) accept:
+
+```text
+auto
+en
+```
+
+Multilingual models accept `auto` and every supported language code.
+
+Invalid model and language values are rejected before recording starts.
+
+Switching models through the CLI updates the config:
 
 ```bash
 asryx --model use small.en
 ```
 
-Switching language through the CLI updates the same file and preserves the active model.
+Switching language through the CLI updates the same config and preserves the active model:
 
 ```bash
 asryx --language es
 asryx --language auto
 ```
 
-You can also edit it manually.
+Manual edits are also valid:
 
-```bash
+```text
 model=base
 language=de
 ```
 
-`model` sets the active Whisper model. `language` controls what language the model transcribes in.
-
-`auto` keeps automatic language detection. A language code locks transcription to that language. Invalid language values fail before recording starts.
-
-English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept `auto` or `en`, multilingual models accept every supported code.
-
 <details>
-<summary>Supported language codes</summary>
+<summary><strong>Supported language codes</strong></summary>
 
 <br/>
 
@@ -508,18 +478,23 @@ English-only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept 
 
 </details>
 
-## Audio
+## Uninstallation
 
-Prefers PipeWire.
-
-```text
-pw-record
+```bash
+./scripts/uninstall
 ```
 
-If unavailable, it falls back to ALSA.
+Removes owned files and leaves shared system packages untouched.
+
+Removed paths:
 
 ```text
-arecord
+~/.local/bin/asryx
+~/.local/opt/whisper.cpp
+~/.local/share/asryx
+~/.cache/asryx
+~/.asryx.conf
+$XDG_RUNTIME_DIR/asryx
 ```
 
 ## License
