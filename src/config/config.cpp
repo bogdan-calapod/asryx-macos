@@ -39,6 +39,9 @@ Config load_config()
     else if (key == constants::config::language_key) {
       cfg.language = val;
     }
+    else if (key == constants::config::pipe_to_key) {
+      cfg.pipe_to = val;
+    }
   }
 
   return cfg;
@@ -59,6 +62,7 @@ void save_config(const Config& cfg)
 
     file << constants::config::model_key << "=" << cfg.model << "\n";
     file << constants::config::language_key << "=" << cfg.language << "\n";
+    file << constants::config::pipe_to_key << "=" << cfg.pipe_to << "\n";
   }
 
   std::filesystem::rename(tmp_path, path);

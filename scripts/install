@@ -86,7 +86,7 @@ write_default_config_if_missing() {
   [[ -e "${cfg}" ]] && return 0
 
   _asryx_log "writing ${cfg}"
-  printf 'model=%s\nlanguage=%s\n' "${model_name}" "${ASRYX_DEFAULT_LANGUAGE}" >"${cfg}"
+  printf 'model=%s\nlanguage=%s\npipe_to=\n' "${model_name}" "${ASRYX_DEFAULT_LANGUAGE}" >"${cfg}"
 }
 
 install_and_select_model() {
