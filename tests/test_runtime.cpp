@@ -1,3 +1,4 @@
+#include "config/config.hpp"
 #include "constants/constants.hpp"
 #include "model/model.hpp"
 #include "platform/fs.hpp"
@@ -22,7 +23,8 @@ void run_test_runtime()
 
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::idle_state));
 
-  runtime::toggle();
+  const auto cfg = config::load_config();
+  runtime::toggle(cfg);
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::recording_state));
 
   auto runtime_dir = platform::get_runtime_directory();

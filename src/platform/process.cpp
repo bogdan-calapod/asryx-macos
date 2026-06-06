@@ -156,6 +156,7 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
   }
 
   if (pid == 0) {
+    (void)signal(SIGPIPE, SIG_DFL);
     close(pipe_fds[1]);
     dup2(pipe_fds[0], STDIN_FILENO);
     close(pipe_fds[0]);
@@ -167,6 +168,7 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
 
   close(pipe_fds[0]);
 
+  auto previous_sigpipe = signal(SIGPIPE, SIG_IGN);
   const char* ptr = input.data();
   size_t remaining = input.size();
 
@@ -181,6 +183,7 @@ bool run_process_with_stdin(const std::vector<std::string>& argv, const std::str
   }
 
   close(pipe_fds[1]);
+  (void)signal(SIGPIPE, previous_sigpipe);
   return wait_process(pid) == 0;
 }
 

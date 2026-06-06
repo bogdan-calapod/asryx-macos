@@ -11,6 +11,7 @@ void run_test_process()
   ASSERT_TRUE(platform::run_process_blocking({"sh", "-c", "exit 0"}));
   ASSERT_FALSE(platform::run_process_blocking({"sh", "-c", "exit 7"}));
   ASSERT_TRUE(platform::run_process_with_stdin({"sh", "-c", "cat >/dev/null"}, "hello"));
+  ASSERT_FALSE(platform::run_process_with_stdin({"sh", "-c", "exit 7"}, "hello"));
   ASSERT_TRUE(platform::is_process_running(getpid()));
 
   std::cout << "test_process passed\n";

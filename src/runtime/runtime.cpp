@@ -171,11 +171,10 @@ std::filesystem::path write_runtime_log(const std::filesystem::path& runtime_dir
   return path;
 }
 
-void start_recording(const std::filesystem::path& runtime_dir)
+void start_recording(const std::filesystem::path& runtime_dir, const config::Config& cfg)
 {
   clean_stale_payload(runtime_dir);
 
-  auto cfg = config::load_config();
   model::validate_config(cfg);
   if (!model::is_model_installed(cfg.model)) {
     throw std::runtime_error("model '" + cfg.model +
@@ -192,7 +191,37 @@ void start_recording(const std::filesystem::path& runtime_dir)
   engine::send_notification("recording…");
 }
 
-void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid)
+void route_transcription(const std::filesystem::path& runtime_dir, const config::Config& cfg,
+                         const std::string& output)
+{
+  if (!engine::copy_to_clipboard(output)) {
+    const auto log_path =
+        write_runtime_log(runtime_dir, "clipboard copy failed; transcript was not copied.\n");
+    std::cerr << "clipboard failed; see log: " << log_path << "\n";
+    engine::send_notification("clipboard failed; see log");
+    clean_stale_payload(runtime_dir);
+    return;
+  }
+
+  if (cfg.pipe_to.empty()) {
+    engine::send_notification("transcription copied to clipboard.");
+    clean_stale_payload(runtime_dir);
+    return;
+  }
+
+  if (!platform::run_process_with_stdin({"sh", "-c", cfg.pipe_to}, output)) {
+    const auto log_path =
+        write_runtime_log(runtime_dir, "pipe target failed; transcript was copied to clipboard.\n");
+    std::cerr << "pipe target failed; transcript remains in clipboard; see log: " << log_path
+              << "\n";
+  }
+
+  engine::send_notification("piped and copied to clipboard.");
+  clean_stale_payload(runtime_dir);
+}
+
+void stop_and_transcribe(const std::filesystem::path& runtime_dir, const config::Config& cfg,
+                         pid_t rec_pid)
 {
   if (!engine::stop_recording(rec_pid)) {
     print_recorder_error(runtime_dir);
@@ -202,7 +231,6 @@ void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid
 
   write_state(runtime_dir, std::string(constants::runtime::transcribing_state));
 
-  auto cfg = config::load_config();
   const auto language = model::transcription_language_for(cfg);
   auto model_path = model::get_model_path(cfg.model);
   auto wav_path = runtime_dir / std::string(constants::runtime::recorder_wav_file);
@@ -214,17 +242,7 @@ void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid
     return;
   }
 
-  if (engine::copy_to_clipboard(output)) {
-    engine::send_notification("copied to clipboard");
-    clean_stale_payload(runtime_dir);
-    return;
-  }
-
-  const auto log_path =
-      write_runtime_log(runtime_dir, "clipboard copy failed; transcript was not copied.\n");
-  std::cerr << "clipboard failed; see log: " << log_path << "\n";
-  engine::send_notification("clipboard failed; see log");
-  clean_stale_payload(runtime_dir);
+  route_transcription(runtime_dir, cfg, output);
 }
 
 } // namespace
@@ -246,7 +264,7 @@ std::string get_status()
   return std::string(constants::runtime::idle_state);
 }
 
-void toggle()
+void toggle(const config::Config& cfg)
 {
   auto runtime_dir = platform::get_runtime_directory();
   if (!acquire_lock(runtime_dir)) {
@@ -256,10 +274,10 @@ void toggle()
   try {
     pid_t rec_pid = 0;
     if (has_live_recorder(runtime_dir, rec_pid)) {
-      stop_and_transcribe(runtime_dir, rec_pid);
+      stop_and_transcribe(runtime_dir, cfg, rec_pid);
     }
     else {
-      start_recording(runtime_dir);
+      start_recording(runtime_dir, cfg);
     }
 
     release_lock(runtime_dir);
