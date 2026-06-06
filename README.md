@@ -1,6 +1,6 @@
 <div align="center">
 
-# ASRYX
+# asryx
 
 <p align="center">
   <a href="https://github.com/rccyx/asryx/actions/workflows/ci.yml">
