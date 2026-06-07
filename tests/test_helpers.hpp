@@ -27,6 +27,7 @@
 #endif // ASRYX_TESTS_TEST_HELPERS_HPP
 
 void run_test_config();
+void run_test_app();
 void run_test_model();
 void run_test_lock();
 void run_test_process();

@@ -5,6 +5,7 @@
 #include <string>
 
 void run_test_config();
+void run_test_app();
 void run_test_model();
 void run_test_lock();
 void run_test_process();
@@ -62,6 +63,7 @@ int main()
 
     std::cout << "Running unit tests...\n";
     run_test_config();
+    run_test_app();
     run_test_model();
     run_test_lock();
     run_test_process();
