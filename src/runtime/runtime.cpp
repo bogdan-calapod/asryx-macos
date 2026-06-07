@@ -23,7 +23,11 @@ namespace runtime {
 namespace {
 
 #ifdef ASRYX_TESTING
-int toggle_entries = 0;
+int& toggle_entries()
+{
+  static int entries = 0;
+  return entries;
+}
 #endif
 
 std::filesystem::path lock_dir_for(const std::filesystem::path& runtime_dir)
@@ -278,7 +282,7 @@ std::string get_status()
 void toggle()
 {
 #ifdef ASRYX_TESTING
-  ++toggle_entries;
+  ++toggle_entries();
 #endif
 
   auto runtime_dir = platform::get_runtime_directory();
@@ -324,12 +328,12 @@ namespace testing {
 
 void reset_toggle_entry_count()
 {
-  toggle_entries = 0;
+  toggle_entries() = 0;
 }
 
 int toggle_entry_count()
 {
-  return toggle_entries;
+  return toggle_entries();
 }
 
 } // namespace testing

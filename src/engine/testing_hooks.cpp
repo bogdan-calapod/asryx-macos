@@ -6,71 +6,76 @@ namespace engine::testing {
 
 namespace {
 
-StartRecordingHook start_recording_hook_value = nullptr;
-StopRecordingHook stop_recording_hook_value = nullptr;
-TranscribeHook transcribe_hook_value = nullptr;
-CopyToClipboardHook copy_to_clipboard_hook_value = nullptr;
-NotificationHook notification_hook_value = nullptr;
+struct Hooks
+{
+  StartRecordingHook start_recording = nullptr;
+  StopRecordingHook stop_recording = nullptr;
+  TranscribeHook transcribe = nullptr;
+  CopyToClipboardHook copy_to_clipboard = nullptr;
+  NotificationHook notification = nullptr;
+};
+
+Hooks& hooks()
+{
+  static Hooks value;
+  return value;
+}
 
 } // namespace
 
 void set_start_recording_hook(StartRecordingHook hook)
 {
-  start_recording_hook_value = hook;
+  hooks().start_recording = hook;
 }
 
 void set_stop_recording_hook(StopRecordingHook hook)
 {
-  stop_recording_hook_value = hook;
+  hooks().stop_recording = hook;
 }
 
 void set_transcribe_hook(TranscribeHook hook)
 {
-  transcribe_hook_value = hook;
+  hooks().transcribe = hook;
 }
 
 void set_copy_to_clipboard_hook(CopyToClipboardHook hook)
 {
-  copy_to_clipboard_hook_value = hook;
+  hooks().copy_to_clipboard = hook;
 }
 
 void set_notification_hook(NotificationHook hook)
 {
-  notification_hook_value = hook;
+  hooks().notification = hook;
 }
 
 void reset_hooks()
 {
-  start_recording_hook_value = nullptr;
-  stop_recording_hook_value = nullptr;
-  transcribe_hook_value = nullptr;
-  copy_to_clipboard_hook_value = nullptr;
-  notification_hook_value = nullptr;
+  hooks() = Hooks{};
 }
 
 StartRecordingHook start_recording_hook()
 {
-  return start_recording_hook_value;
+  return hooks().start_recording;
 }
 
 StopRecordingHook stop_recording_hook()
 {
-  return stop_recording_hook_value;
+  return hooks().stop_recording;
 }
 
 TranscribeHook transcribe_hook()
 {
-  return transcribe_hook_value;
+  return hooks().transcribe;
 }
 
 CopyToClipboardHook copy_to_clipboard_hook()
 {
-  return copy_to_clipboard_hook_value;
+  return hooks().copy_to_clipboard;
 }
 
 NotificationHook notification_hook()
 {
-  return notification_hook_value;
+  return hooks().notification;
 }
 
 } // namespace engine::testing
