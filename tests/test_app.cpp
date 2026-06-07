@@ -62,7 +62,9 @@ void reset_config()
 void assert_control_command_does_not_record(const std::vector<std::string>& args)
 {
   clean_runtime_files();
+  runtime::testing::reset_toggle_entry_count();
   ASSERT_EQ(app::run(args), 0);
+  ASSERT_EQ(runtime::testing::toggle_entry_count(), 0);
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::idle_state));
   ASSERT_FALSE(recording_files_exist());
 }
@@ -89,7 +91,9 @@ void run_test_app()
   reset_config();
   clean_runtime_files();
 
+  runtime::testing::reset_toggle_entry_count();
   ASSERT_EQ(app::run({}), 0);
+  ASSERT_EQ(runtime::testing::toggle_entry_count(), 1);
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::recording_state));
   ASSERT_TRUE(recording_files_exist());
   stop_started_recording();
@@ -97,6 +101,9 @@ void run_test_app()
   assert_control_command_does_not_record({"status"});
   assert_control_command_does_not_record({"--language", "en"});
   assert_control_command_does_not_record({"--model", "list"});
+  assert_control_command_does_not_record({"--model", "install", "base.en"});
+  assert_control_command_does_not_record({"--model", "use", "base.en"});
+  assert_control_command_does_not_record({"--model", "uninstall", "tiny.en"});
   assert_control_command_does_not_record({"--pipe-to", "tee -a ~/x.txt"});
 
   auto cfg = config::load_config();
@@ -107,11 +114,15 @@ void run_test_app()
   ASSERT_EQ(cfg.pipe_to, std::string(""));
 
   clean_runtime_files();
+  runtime::testing::reset_toggle_entry_count();
   ASSERT_EQ(app::run({"--output", "clipboard"}), 1);
+  ASSERT_EQ(runtime::testing::toggle_entry_count(), 0);
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::idle_state));
   ASSERT_FALSE(recording_files_exist());
 
+  runtime::testing::reset_toggle_entry_count();
   ASSERT_EQ(app::run({"--output", "exec", "--pipe-to", "tee -a ~/x.txt"}), 1);
+  ASSERT_EQ(runtime::testing::toggle_entry_count(), 0);
   ASSERT_EQ(runtime::get_status(), std::string(constants::runtime::idle_state));
   ASSERT_FALSE(recording_files_exist());
 
