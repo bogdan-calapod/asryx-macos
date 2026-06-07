@@ -35,6 +35,15 @@ namespace engine {
 
 namespace {
 
+#ifdef ASRYX_TESTING
+#  define ASRYX_TEST_HOOK(name, ...)                                                               \
+    if (auto hook = testing::name()) {                                                             \
+      return hook(__VA_ARGS__);                                                                    \
+    }
+#else
+#  define ASRYX_TEST_HOOK(name, ...)
+#endif
+
 constexpr std::uint16_t wav_pcm = 1;
 constexpr std::uint16_t wav_extensible = 65534;
 constexpr float pcm16_scale = 32768.0F;
@@ -235,6 +244,8 @@ struct WhisperDeleter
 
 pid_t start_recording(const std::string& wav_path, const std::string& err_path)
 {
+  ASRYX_TEST_HOOK(start_recording_hook, wav_path, err_path);
+
   std::vector<std::string> args;
   if (platform::command_exists("pw-record")) {
     args = {"pw-record", "--format=s16", "--rate=16000", "--channels=1", wav_path};
@@ -256,6 +267,8 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
 
 bool stop_recording(pid_t pid)
 {
+  ASRYX_TEST_HOOK(stop_recording_hook, pid);
+
   if (pid <= 0) {
     return false;
   }
@@ -277,6 +290,8 @@ bool stop_recording(pid_t pid)
 std::string transcribe(const std::string& model_path, const std::string& wav_path,
                        const std::string& language)
 {
+  ASRYX_TEST_HOOK(transcribe_hook, model_path, wav_path, language);
+
   if (!std::filesystem::exists(model_path)) {
     throw std::runtime_error("model file does not exist: " + model_path);
   }
@@ -317,30 +332,6 @@ std::string transcribe(const std::string& model_path, const std::string& wav_pat
   }
 
   return output;
-}
-
-bool copy_to_clipboard(const std::string& text)
-{
-  if (platform::command_exists("wl-copy")) {
-    return platform::run_process_with_stdin({"wl-copy"}, text);
-  }
-
-  if (platform::command_exists("xclip")) {
-    return platform::run_process_with_stdin({"xclip", "-selection", "clipboard"}, text);
-  }
-
-  std::cerr << "Warning: Neither wl-copy nor xclip is available to copy transcript.\n";
-  return false;
-}
-
-bool send_notification(const std::string& message)
-{
-  if (platform::command_exists("notify-send")) {
-    return platform::run_process_blocking(
-        {"notify-send", std::string(constants::app_name), message});
-  }
-
-  return false;
 }
 
 } // namespace engine
