@@ -1,5 +1,6 @@
 #include "app/app.hpp"
 
+#include "config/config.hpp"
 #include "model/model.hpp"
 #include "runtime/runtime.hpp"
 
@@ -17,11 +18,31 @@ void print_usage()
             << "Usage:\n"
             << "  asryx                           Toggle recording/transcription\n"
             << "  asryx status                    Print runtime state\n"
+            << "  asryx --pipe-to <command>       Set post-copy pipe command\n"
+            << "  asryx --no-pipe                 Clear post-copy pipe command\n"
             << "  asryx --language <code|auto>    Select transcription language\n"
             << "  asryx --model list              List available model sizes\n"
             << "  asryx --model install <name>    Install a model\n"
             << "  asryx --model use <name>        Select active model\n"
             << "  asryx --model uninstall <name>  Uninstall a model\n";
+}
+
+void set_pipe_to(const std::string& command)
+{
+  if (command.empty()) {
+    throw std::runtime_error("--pipe-to requires a non-empty command string");
+  }
+
+  auto cfg = config::load_config();
+  cfg.pipe_to = command;
+  config::save_config(cfg);
+}
+
+void clear_pipe_to()
+{
+  auto cfg = config::load_config();
+  cfg.pipe_to.clear();
+  config::save_config(cfg);
 }
 
 } // namespace
@@ -30,12 +51,22 @@ int run(const std::vector<std::string>& args)
 {
   try {
     if (args.empty()) {
-      runtime::toggle();
+      runtime::toggle(config::load_config());
       return 0;
     }
 
     if (args.size() == 1 && args[0] == "status") {
       std::cout << runtime::get_status() << "\n";
+      return 0;
+    }
+
+    if (args.size() == 2 && args[0] == "--pipe-to") {
+      set_pipe_to(args[1]);
+      return 0;
+    }
+
+    if (args.size() == 1 && args[0] == "--no-pipe") {
+      clear_pipe_to();
       return 0;
     }
 
