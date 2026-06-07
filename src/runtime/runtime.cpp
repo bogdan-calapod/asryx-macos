@@ -22,6 +22,10 @@ namespace runtime {
 
 namespace {
 
+#ifdef ASRYX_TESTING
+int toggle_entries = 0;
+#endif
+
 std::filesystem::path lock_dir_for(const std::filesystem::path& runtime_dir)
 {
   return runtime_dir / std::string(constants::runtime::lock_dir_name);
@@ -171,10 +175,11 @@ std::filesystem::path write_runtime_log(const std::filesystem::path& runtime_dir
   return path;
 }
 
-void start_recording(const std::filesystem::path& runtime_dir, const config::Config& cfg)
+void start_recording(const std::filesystem::path& runtime_dir)
 {
   clean_stale_payload(runtime_dir);
 
+  auto cfg = config::load_config();
   model::validate_config(cfg);
   if (!model::is_model_installed(cfg.model)) {
     throw std::runtime_error("model '" + cfg.model +
@@ -185,6 +190,9 @@ void start_recording(const std::filesystem::path& runtime_dir, const config::Con
   auto wav_path = runtime_dir / std::string(constants::runtime::recorder_wav_file);
   auto err_path = runtime_dir / std::string(constants::runtime::recorder_error_file);
   pid_t pid = engine::start_recording(wav_path.string(), err_path.string());
+  if (!platform::is_process_running(pid)) {
+    throw std::runtime_error("recorder process exited before startup completed");
+  }
 
   std::ofstream(runtime_dir / std::string(constants::runtime::recorder_pid_file)) << pid << "\n";
   write_state(runtime_dir, std::string(constants::runtime::recording_state));
@@ -223,8 +231,7 @@ void route_transcription(const std::filesystem::path& runtime_dir, const config:
   clean_stale_payload(runtime_dir);
 }
 
-void stop_and_transcribe(const std::filesystem::path& runtime_dir, const config::Config& cfg,
-                         pid_t rec_pid)
+void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid)
 {
   if (!engine::stop_recording(rec_pid)) {
     print_recorder_error(runtime_dir);
@@ -234,6 +241,7 @@ void stop_and_transcribe(const std::filesystem::path& runtime_dir, const config:
 
   write_state(runtime_dir, std::string(constants::runtime::transcribing_state));
 
+  auto cfg = config::load_config();
   const auto language = model::transcription_language_for(cfg);
   auto model_path = model::get_model_path(cfg.model);
   auto wav_path = runtime_dir / std::string(constants::runtime::recorder_wav_file);
@@ -267,8 +275,12 @@ std::string get_status()
   return std::string(constants::runtime::idle_state);
 }
 
-void toggle(const config::Config& cfg)
+void toggle()
 {
+#ifdef ASRYX_TESTING
+  ++toggle_entries;
+#endif
+
   auto runtime_dir = platform::get_runtime_directory();
   if (!acquire_lock(runtime_dir)) {
     return;
@@ -277,10 +289,10 @@ void toggle(const config::Config& cfg)
   try {
     pid_t rec_pid = 0;
     if (has_live_recorder(runtime_dir, rec_pid)) {
-      stop_and_transcribe(runtime_dir, cfg, rec_pid);
+      stop_and_transcribe(runtime_dir, rec_pid);
     }
     else {
-      start_recording(runtime_dir, cfg);
+      start_recording(runtime_dir);
     }
 
     release_lock(runtime_dir);
@@ -306,5 +318,21 @@ void toggle(const config::Config& cfg)
     std::exit(1);
   }
 }
+
+#ifdef ASRYX_TESTING
+namespace testing {
+
+void reset_toggle_entry_count()
+{
+  toggle_entries = 0;
+}
+
+int toggle_entry_count()
+{
+  return toggle_entries;
+}
+
+} // namespace testing
+#endif
 
 } // namespace runtime

@@ -51,7 +51,7 @@ int run(const std::vector<std::string>& args)
 {
   try {
     if (args.empty()) {
-      runtime::toggle(config::load_config());
+      runtime::toggle();
       return 0;
     }
 
