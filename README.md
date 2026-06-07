@@ -29,9 +29,11 @@
 
 This is a native C++ ASR binary toggle/CLI for Linux.
 
-Links against `whisper.cpp` (built locally against a pinned source tree) as an embedded library through it's public C compatible API to supply the inference engine, while `asryx` owns the entire native Linux runtime around it.
+Links against `whisper.cpp` (built locally against a pinned source tree) as an embedded library through it's public C compatible API.
 
-Records audio through the active Linux audio stack, runs recognition in process, writes the transcript to the active clipboard backend, emits desktop notifications, and removes runtime artifacts after completion.
+The engine supplies the inference, all 99 language support options for all Whisper models, while `asryx` owns the entire native Linux runtime around it.
+
+Records audio through the active Linux audio stack, runs recognition in process, writes the transcript to the active clipboard backend, optionally pipes it to a user command, emits desktop notifications, and removes runtime artifacts after completion.
 
 Easily [installed](#installation), and more easily [removed](#uninstallation).
 
@@ -75,15 +77,19 @@ The next invocation stops capture, transcribes locally, copies the transcript, n
 And a very simple [CLI](#cli)
 
 ```
-asryx                           # Toggle record/transcribe
-asryx status                    # Check idle/recording/transcribing
-asryx --language <auto|CODE>    # Set language
-asryx --model list              # List supported models
-asryx --model install <MODEL>   # Download model
-asryx --model use <MODEL>       # Switch model
+asryx                         # Toggle record/transcribe
+asryx status                  # Check idle/recording/transcribing
+asryx --pipe-to '<COMMAND>'   # Set post copy pipe command
+asryx --no-pipe               # Clear post copy pipe command
+asryx --language <auto|CODE>  # Set language
+asryx --model list            # List supported models
+asryx --model install <MODEL> # Download model
+asryx --model use <MODEL>     # Switch model
 ```
 
 ## Mechanism
+
+My biggest problem with this ecosystem is relying on black box tools without knowing what they do to my system. So, here's exactly how this tool works:
 
 Audio capture orchestration, runtime state, model management, clipboard delivery, notification dispatch, cleanup, and failure recovery are all owned by the binary.
 
@@ -91,7 +97,7 @@ The audio path is native code. Captured audio is validated as RIFF/WAVE, walked 
 
 Dependency free as in, not even a WAV library sits between the recorder output and the model input.
 
-Dependencies are ones you already have, only needed to compile the program, pipe audio to your audio server, and emit notifications, that's it.
+Dependencies are ones you already have, only needed to compile the program, pipe audio to the audio server, and emit notifications, that's it.
 
 The recorder is launched as a native Linux process, tracked through its PID, stopped by signal, and verified to have exited before transcription begins.
 
@@ -109,6 +115,8 @@ press
   -> mark state as recording
   -> notify
 
+talk...
+
 press again
   -> acquire lock
   -> stop recorder
@@ -120,6 +128,7 @@ press again
   -> run whisper.cpp inference in-process
   -> trim transcript
   -> write transcript to clipboard
+  -> if pipe_to is configured, pipe transcript to command stdin
   -> notify
   -> remove runtime files
   -> release lock
@@ -135,14 +144,6 @@ ALSA is used as fallback:
 
 ```text
 arecord
-```
-
-Captured audio is written as a temporary WAV file:
-
-```text
-mono
-16 kHz
-signed 16-bit
 ```
 
 Clipboard backends:
@@ -182,7 +183,10 @@ rec.err
 state
 ```
 
-After a completed transcription, runtime files are removed. The transcript survives only through the clipboard.
+After a completed transcription, runtime files are completely removed. The transcript is always copied to the clipboard first. If `pipe_to` is configured, the same transcript is then piped into that command's stdin.
+
+> [!NOTE]
+> The clipboard is the permanent backup path. If the custom command exits non zero, closes stdin early, or otherwise fails, the transcript remains in the clipboard so the text isn't lost.
 
 ## Installation
 
@@ -223,7 +227,7 @@ Expected output:
 idle
 ```
 
-`asryx status` prints one of:
+prints one of:
 
 ```text
 idle
@@ -269,26 +273,28 @@ Desktop notifications require an active notification daemon such as Mako, Dunst,
 
 The binary takes no arguments to toggle, so bind it to a key in the active compositor or desktop environment.
 
-Hyprland:
+I personally use `Alt + W`, so the config for each DE/WM becomes:
+
+Hyprland
 
 ```ini
 bind = ALT, W, exec, asryx
 ```
 
-Sway / i3:
+Sway / i3
 
 ```ini
 bindsym $mod+w exec asryx
 ```
 
-GNOME:
+GNOME
 
 ```text
 Settings > Keyboard > Custom Shortcuts
 command: asryx
 ```
 
-KDE Plasma:
+KDE Plasma
 
 ```text
 System Settings > Shortcuts > Custom Shortcuts
@@ -305,6 +311,8 @@ The full surface area:
 ```text
 asryx
 asryx status
+asryx --pipe-to '<COMMAND>'
+asryx --no-pipe
 asryx --language <auto|CODE>
 asryx --model list
 asryx --model install <MODEL>
@@ -342,6 +350,45 @@ Set transcription language:
 asryx --language auto
 asryx --language en
 asryx --language de
+```
+
+Set the post copy pipe hook:
+
+```bash
+asryx --pipe-to 'tee -a ~/transcripts.txt'
+```
+
+`asryx --pipe-to '<COMMAND>'` simply updates `pipe_to` in `~/.asryx.conf` and exits, you can also do it manually of course.
+
+`--pipe-to` is just a shell command string, so it can be a script path, a binary, or any command expression the shell can run.
+
+> [!IMPORTANT]
+> doesn't verify that the command exists, resolves on `PATH`, or is executable. The command string can point at a shell script, binary, or any command expression. That's your responsibility to verify.
+
+Clear the post copy pipe hook:
+
+```bash
+asryx --no-pipe
+```
+
+This simply clears `pipe_to` in `~/.asryx.conf` and exits.
+
+Clipboard output is the default and always happens first. A completed clipboard only transcription sends this notification:
+
+```text
+transcription copied to clipboard.
+```
+
+`pipe_to` configures an optional post copy hook:
+
+```text
+pipe_to=tee -a /tmp/transcripts.txt
+```
+
+When `pipe_to` is non empty, bare `asryx` copies the transcript to the system clipboard first, then pipes the same text into `pipe_to` through stdin. The pipe path sends this notification:
+
+```text
+piped and copied to clipboard.
 ```
 
 ## Models
@@ -403,7 +450,7 @@ asryx --model use small.en
 
 **Language**
 
-`language` controls transcription language. `auto` detects the language first, which adds a small amount of latency. Locking to a code skips detection entirely.
+`language` controls transcription language. `auto` detects the language first, which adds a small amount of unnecessary latency if you speak the same language all the time. Locking to a code skips detection entirely.
 
 ```bash
 asryx --language es
@@ -416,13 +463,6 @@ English only models (`tiny.en`, `base.en`, `small.en`, `medium.en`) only accept 
 > Language support and transcription quality are a property of the [GGML model weights](https://github.com/ggerganov/whisper.cpp/blob/d682e150908e10caa4c15883c633d7902d685237/src/whisper.cpp#L248).
 
 Invalid model and language values are rejected before recording starts.
-
-Manual edits to the config file are also valid:
-
-```text
-model=base
-language=de
-```
 
 <details>
 <summary><strong>Supported language codes</strong></summary>
@@ -540,9 +580,7 @@ language=de
 ./scripts/uninstall
 ```
 
-Removes owned files and leaves shared system packages untouched.
-
-Removed paths:
+Simply removes the owned files:
 
 ```text
 ~/.local/bin/asryx
