@@ -204,7 +204,7 @@ void route_transcription(const std::filesystem::path& runtime_dir, const config:
   }
 
   if (cfg.pipe_to.empty()) {
-    engine::send_notification("transcription copied to clipboard.");
+    engine::send_notification(std::string(constants::notifications::transcription_copied));
     clean_stale_payload(runtime_dir);
     return;
   }
@@ -214,9 +214,12 @@ void route_transcription(const std::filesystem::path& runtime_dir, const config:
         write_runtime_log(runtime_dir, "pipe target failed; transcript was copied to clipboard.\n");
     std::cerr << "pipe target failed; transcript remains in clipboard; see log: " << log_path
               << "\n";
+    engine::send_notification(std::string(constants::notifications::pipe_failed));
+    clean_stale_payload(runtime_dir);
+    return;
   }
 
-  engine::send_notification("piped and copied to clipboard.");
+  engine::send_notification(std::string(constants::notifications::pipe_copied));
   clean_stale_payload(runtime_dir);
 }
 

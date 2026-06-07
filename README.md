@@ -180,13 +180,14 @@ lock/
 rec.pid
 rec.wav
 rec.err
+error.log
 state
 ```
 
 After a completed transcription, runtime files are completely removed. The transcript is always copied to the clipboard first. If `pipe_to` is configured, the same transcript is then piped into that command's stdin.
 
 > [!NOTE]
-> The clipboard is the permanent backup path. If the custom command exits non zero, closes stdin early, or otherwise fails, the transcript remains in the clipboard so the text isn't lost.
+> The clipboard is the permanent backup path. If the custom command exits non zero or otherwise fails at the process level, the transcript remains in the clipboard so the text isn't lost.
 
 ## Installation
 

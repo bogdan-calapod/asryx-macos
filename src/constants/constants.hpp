@@ -40,6 +40,14 @@ inline constexpr std::string_view transcribing_state = "transcribing";
 
 } // namespace runtime
 
+namespace notifications {
+
+inline constexpr std::string_view transcription_copied = "transcription copied to clipboard.";
+inline constexpr std::string_view pipe_copied = "piped and copied to clipboard.";
+inline constexpr std::string_view pipe_failed = "copied to clipboard (pipe failed).";
+
+} // namespace notifications
+
 namespace paths {
 
 inline constexpr std::string_view local_bin_dir_rel = ".local/bin";
