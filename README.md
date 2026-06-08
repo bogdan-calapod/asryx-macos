@@ -9,7 +9,7 @@
   <a href="#installation">
     <img src="https://img.shields.io/badge/Platform-Linux-black?logo=linux&logoColor=white&style=for-the-badge&labelColor=111111" alt="Platform: Linux"/>
   </a>
-  <a href="#runtime-model">
+  <a href="#mechanism">
     <img src="https://img.shields.io/badge/Offline-100%25-black?logo=shield&logoColor=white&style=for-the-badge&labelColor=111111" alt="Offline"/>
   </a>
   <a href="https://github.com/rccyx/asryx/blob/main/LICENSE">
@@ -29,9 +29,9 @@
 
 This is a native C++ ASR binary toggle/CLI for Linux.
 
-Links against `whisper.cpp` (built locally against a pinned source tree) as an embedded library through it's public C compatible API.
+Runs local transcription against [GGML Whisper](https://github.com/ggml-org/whisper.cpp) models through a [pinned](./versions/) native inference backend, linked in process through its public C compatible API.
 
-The engine supplies the inference, all 99 language support options for all Whisper models, while `asryx` owns the entire native Linux runtime around it.
+The model supplies inference and all 99 language support options, while `asryx` owns the entire native Linux runtime around it.
 
 Records audio through the active Linux audio stack, runs recognition in process, writes the transcript to the active clipboard backend, optionally pipes it to a user command, emits desktop notifications, and removes runtime artifacts after completion.
 
@@ -45,9 +45,7 @@ One command install. You compile the program on your own machine, no package man
 
 It uses standard C++ and Linux [dependencies](#dependencies), and it's CPU only by default, so it works with any machine, regardless of distro or GPU model.
 
-GGML models are downloaded [locally](#uninstallation).
-
-Transcription runs locally against those weights.
+GGML Models are [downloaded locally](#uninstallation) and transcription runs against those weights on your machine.
 
 [Reliable](#mechanism) is the word. Repeated invocations, key repeat, stale locks, interrupted sessions, and abandoned runtime artifacts are handled before a new recording begins.
 
@@ -125,7 +123,7 @@ press again
   -> validate format chunk
   -> locate data chunk
   -> decode PCM16 into float samples
-  -> run whisper.cpp inference in-process
+  -> run local inference in-process
   -> trim transcript
   -> write transcript to clipboard
   -> if pipe_to is configured, pipe transcript to command stdin
@@ -159,7 +157,7 @@ Notifications:
 notify-send
 ```
 
-Whenever the event is emmited, `notify-send` pipes it to Mako, Dunst, or any active desktop notification daemon to render it.
+Whenever the event is emitted, `notify-send` pipes it to Mako, Dunst, or any active desktop notification daemon to render it.
 
 **Runtime state:**
 
@@ -196,7 +194,7 @@ git clone https://github.com/rccyx/asryx
 cd asryx && bash ./scripts/install
 ```
 
-The installer validates the user environment, checks required tools, clones the pinned source, builds the binary locally, installs the executable, writes the version pin, writes the default config, installs the default model, selects it, and prints a PATH note when `~/.local/bin` is unavailable from the current shell.
+The installer validates the user environment, checks required tools, clones the pinned native inference source, builds the binary locally, installs the executable, writes the version pin, writes the default config, installs the default model, selects it, and prints a PATH note when `~/.local/bin` is unavailable from the current shell.
 
 Installed paths:
 
@@ -364,7 +362,7 @@ asryx --pipe-to 'tee -a ~/transcripts.txt'
 `--pipe-to` is just a shell command string, so it can be a script path, a binary, or any command expression the shell can run.
 
 > [!IMPORTANT]
-> doesn't verify that the command exists, resolves on `PATH`, or is executable. The command string can point at a shell script, binary, or any command expression. That's your responsibility to verify.
+> It doesn't verify that the command exists, resolves on `PATH`, or is executable. The command string can point at a shell script, binary, or any command expression. That's your responsibility to verify.
 
 Clear the post copy pipe hook:
 
