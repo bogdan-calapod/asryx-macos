@@ -314,6 +314,8 @@ std::string transcribe(const std::string& model_path, const std::string& wav_pat
   params.print_realtime = false;
   params.print_timestamps = false;
   params.no_timestamps = true;
+  params.suppress_blank = true;
+  params.suppress_nst = true;
   params.language = language_arg;
   params.detect_language = false;
 
