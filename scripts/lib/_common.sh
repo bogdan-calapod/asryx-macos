@@ -14,6 +14,14 @@ _asryx_have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+_asryx_is_macos() {
+  [[ "$(uname -s)" == "Darwin" ]]
+}
+
+_asryx_is_linux() {
+  [[ "$(uname -s)" == "Linux" ]]
+}
+
 _asryx_require_home() {
   [[ -n "${HOME:-}" ]] || _asryx_die "HOME is not set"
   [[ "${HOME}" == /* ]] || _asryx_die "HOME is not absolute: ${HOME}"

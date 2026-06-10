@@ -9,6 +9,9 @@
   <a href="#installation">
     <img src="https://img.shields.io/badge/Platform-Linux-black?logo=linux&logoColor=white&style=for-the-badge&labelColor=111111" alt="Platform: Linux"/>
   </a>
+  <a href="#macos">
+    <img src="https://img.shields.io/badge/Platform-macOS-black?logo=apple&logoColor=white&style=for-the-badge&labelColor=111111" alt="Platform: macOS"/>
+  </a>
   <a href="#mechanism">
     <img src="https://img.shields.io/badge/Offline-100%25-black?logo=shield&logoColor=white&style=for-the-badge&labelColor=111111" alt="Offline"/>
   </a>
@@ -27,7 +30,7 @@
 
 ## Overview
 
-This is a native C++ ASR binary toggle/CLI for Linux.
+This is a native C++ ASR binary toggle/CLI for Linux. macOS is also supported as a secondary target ([see below](#macos)).
 
 Runs local transcription against [GGML Whisper](https://github.com/ggml-org/whisper.cpp) models through a [pinned](./versions/) native inference backend, linked in process through its public C compatible API.
 
@@ -132,7 +135,7 @@ press again
   -> release lock
 ```
 
-Audio capture prefers PipeWire:
+Audio capture prefers PipeWire on Linux:
 
 ```text
 pw-record
@@ -144,20 +147,28 @@ ALSA is used as fallback:
 arecord
 ```
 
+On macOS, audio capture uses `sox` against the default CoreAudio input device:
+
+```text
+sox -d -r 16000 -c 1 -b 16
+```
+
 Clipboard backends:
 
 ```text
 wl-copy                     # Wayland
 xclip -selection clipboard  # X11 fallback
+pbcopy                      # macOS
 ```
 
 Notifications:
 
 ```text
-notify-send
+notify-send   # Linux
+osascript     # macOS
 ```
 
-Whenever the event is emitted, `notify-send` pipes it to Mako, Dunst, or any active desktop notification daemon to render it.
+On Linux, `notify-send` pipes the event to Mako, Dunst, or any active desktop notification daemon to render it. On macOS, `osascript` posts a `display notification` event through the parent terminal application's bundle id.
 
 **Runtime state:**
 
@@ -188,6 +199,8 @@ After a completed transcription, runtime files are completely removed. The trans
 > The clipboard is the permanent backup path. If the custom command exits non zero or otherwise fails at the process level, the transcript remains in the clipboard so the text isn't lost.
 
 ## Installation
+
+### Linux
 
 ```bash
 git clone https://github.com/rccyx/asryx
@@ -237,6 +250,36 @@ transcribing
 > [!TIP]
 > This output can be used for status surfaces such as Waybar and Polybar.
 
+### macOS
+
+Recommended:
+
+```bash
+brew install bogdan-calapod/tap/asryx
+```
+
+This installs a Homebrew-managed `asryx` binary that links a bundled, pinned `whisper.cpp` source tree shipped inside the Homebrew Cellar. Models live under `~/.local/share/asryx/`, the config at `~/.asryx.conf`, and the runtime directory at `/tmp/asryx-$UID`.
+
+After installation:
+
+```bash
+asryx --model install base.en
+asryx --model use base.en
+asryx status   # idle
+```
+
+From source:
+
+```bash
+git clone https://github.com/rccyx/asryx
+cd asryx && bash ./scripts/install
+```
+
+The installer detects macOS, requires Homebrew and the Xcode Command Line Tools, and auto-installs missing build dependencies (`cmake`, `ninja`, `git`, `curl`, `sox`) before building and installing the binary at `~/.local/bin/asryx`.
+
+> [!NOTE]
+> On macOS, the first invocation triggers a microphone permission prompt against the parent terminal application (Terminal.app, iTerm, Ghostty, etc.). Grant it in **System Settings > Privacy & Security > Microphone**. The same applies to notifications.
+
 ## Dependencies
 
 You probably have most of these already, but check.
@@ -267,6 +310,27 @@ echo "$XDG_SESSION_TYPE"
 ```
 
 Desktop notifications require an active notification daemon such as Mako, Dunst, or the session's native notification service.
+
+### macOS dependencies
+
+Build (auto-installed by `./scripts/install` if Homebrew is present):
+
+```text
+xcode command line tools   # xcode-select --install
+homebrew                   # https://brew.sh
+cmake
+ninja
+git
+curl
+sox                        # audio capture
+```
+
+Runtime built-ins (always present on macOS):
+
+```text
+pbcopy        # clipboard
+osascript     # notifications
+```
 
 ## Keybind
 
@@ -299,6 +363,31 @@ KDE Plasma
 System Settings > Shortcuts > Custom Shortcuts
 command: asryx
 ```
+
+macOS — Karabiner-Elements (`~/.config/karabiner/karabiner.json` complex modification, or via the GUI):
+
+```json
+{
+  "from": { "key_code": "w", "modifiers": { "mandatory": ["left_option"] } },
+  "to":   [{ "shell_command": "/opt/homebrew/bin/asryx" }]
+}
+```
+
+macOS — Hammerspoon (`~/.hammerspoon/init.lua`):
+
+```lua
+hs.hotkey.bind({"alt"}, "W", function()
+  hs.execute("/opt/homebrew/bin/asryx", true)
+end)
+```
+
+macOS — skhd (`~/.config/skhd/skhdrc`):
+
+```text
+alt - w : /opt/homebrew/bin/asryx
+```
+
+macOS — Raycast: add a script command pointing at `/opt/homebrew/bin/asryx` and assign it a hotkey from the Raycast extension preferences.
 
 > [!TIP]
 > A clipboard manager is highly recommended for long recordings. In case you copy something else by mistake after the transcription is emitted.
@@ -587,11 +676,20 @@ Simply removes the owned files:
 ~/.local/share/asryx
 ~/.cache/asryx
 ~/.asryx.conf
-$XDG_RUNTIME_DIR/asryx
+$XDG_RUNTIME_DIR/asryx     # Linux
+/tmp/asryx-$UID            # macOS / Linux fallback
 ```
 
 > [!NOTE]
 > Deletion goes through owned [path validation](/src/platform/fs.cpp) before files or directories are even removed.
+
+If you installed asryx via Homebrew on macOS, uninstall the binary with:
+
+```bash
+brew uninstall asryx
+```
+
+Then run `./scripts/uninstall` (from a checkout) to clear user-owned data and runtime artifacts; the script skips paths that do not exist.
 
 ## License
 

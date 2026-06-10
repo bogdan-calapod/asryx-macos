@@ -14,7 +14,7 @@ namespace {
 
 void print_usage()
 {
-  std::cerr << "asryx - native Linux voice to text toggle\n\n"
+  std::cerr << "asryx - native voice to text toggle\n\n"
             << "Usage:\n"
             << "  asryx                           Toggle recording/transcription\n"
             << "  asryx status                    Print runtime state\n"

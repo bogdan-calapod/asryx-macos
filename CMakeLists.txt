@@ -13,7 +13,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(ASRYX_WHISPER_SOURCE_DIR "$ENV{HOME}/.local/opt/whisper.cpp")
+set(ASRYX_WHISPER_SOURCE_DIR_DEFAULT "$ENV{HOME}/.local/opt/whisper.cpp"
+    CACHE PATH "Default path the installed asryx binary looks for the whisper.cpp source tree")
+
+set(ASRYX_WHISPER_SOURCE_DIR "${ASRYX_WHISPER_SOURCE_DIR_DEFAULT}"
+    CACHE PATH "Path to the whisper.cpp source tree used at build time")
 
 if(NOT EXISTS "${ASRYX_WHISPER_SOURCE_DIR}/CMakeLists.txt")
   message(
@@ -39,7 +43,12 @@ file(GLOB_RECURSE ASRYX_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.h
 
 add_executable(asryx ${ASRYX_SOURCES} ${ASRYX_HEADERS})
 target_include_directories(asryx PRIVATE "${PROJECT_SOURCE_DIR}/src")
-target_compile_definitions(asryx PRIVATE ASRYX_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(
+  asryx
+  PRIVATE
+    ASRYX_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+    ASRYX_WHISPER_SOURCE_DIR_DEFAULT="${ASRYX_WHISPER_SOURCE_DIR_DEFAULT}"
+)
 target_link_libraries(asryx PRIVATE whisper)
 
 asryx_enable_warnings(asryx)

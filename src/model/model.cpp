@@ -29,7 +29,11 @@ std::filesystem::path model_dir()
 
 std::filesystem::path whisper_source_dir()
 {
+#ifdef ASRYX_WHISPER_SOURCE_DIR_DEFAULT
+  return std::filesystem::path(ASRYX_WHISPER_SOURCE_DIR_DEFAULT);
+#else
   return platform::get_home_relative_path(std::string(constants::paths::whisper_checkout_rel));
+#endif
 }
 
 std::filesystem::path whisper_model_path(const std::string& name)

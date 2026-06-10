@@ -7,7 +7,7 @@ function(asryx_enable_sanitizers target)
   endif()
 
   if(MSVC)
-    message(FATAL_ERROR "Sanitizer presets are configured for GCC/Clang on Linux.")
+    message(FATAL_ERROR "Sanitizer presets are configured for GCC/Clang/AppleClang.")
   endif()
 
   if(ASRYX_SANITIZER STREQUAL "address")

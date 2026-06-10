@@ -41,19 +41,44 @@ int main()
                   "while :; do sleep 1; done\n";
     }
     {
+      std::ofstream recorder(bin_path / "sox");
+      recorder << "#!/bin/sh\n"
+                  "wav=\"\"\n"
+                  "for arg do\n"
+                  "  case \"$arg\" in\n"
+                  "    *.wav) wav=\"$arg\" ;;\n"
+                  "  esac\n"
+                  "done\n"
+                  "[ -n \"$wav\" ] && : > \"$wav\"\n"
+                  "trap 'exit 0' INT TERM\n"
+                  "while :; do sleep 1; done\n";
+    }
+    {
       std::ofstream clipboard(bin_path / "wl-copy");
+      clipboard << "#!/bin/sh\ncat >/dev/null\n";
+    }
+    {
+      std::ofstream clipboard(bin_path / "pbcopy");
       clipboard << "#!/bin/sh\ncat >/dev/null\n";
     }
     {
       std::ofstream notify(bin_path / "notify-send");
       notify << "#!/bin/sh\nexit 0\n";
     }
-    std::filesystem::permissions(bin_path / "pw-record", std::filesystem::perms::owner_exec,
-                                 std::filesystem::perm_options::add);
-    std::filesystem::permissions(bin_path / "wl-copy", std::filesystem::perms::owner_exec,
-                                 std::filesystem::perm_options::add);
-    std::filesystem::permissions(bin_path / "notify-send", std::filesystem::perms::owner_exec,
-                                 std::filesystem::perm_options::add);
+    {
+      std::ofstream notify(bin_path / "osascript");
+      notify << "#!/bin/sh\nexit 0\n";
+    }
+    const auto add_exec = [](const std::filesystem::path& path) {
+      std::filesystem::permissions(path, std::filesystem::perms::owner_exec,
+                                   std::filesystem::perm_options::add);
+    };
+    add_exec(bin_path / "pw-record");
+    add_exec(bin_path / "sox");
+    add_exec(bin_path / "wl-copy");
+    add_exec(bin_path / "pbcopy");
+    add_exec(bin_path / "notify-send");
+    add_exec(bin_path / "osascript");
     setenv("HOME", home_path.c_str(), 1);
     setenv("XDG_RUNTIME_DIR", runtime_path.c_str(), 1);
     const char* path_env = std::getenv("PATH");

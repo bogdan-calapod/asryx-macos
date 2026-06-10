@@ -247,6 +247,15 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
   ASRYX_TEST_HOOK(start_recording_hook, wav_path, err_path);
 
   std::vector<std::string> args;
+#if defined(__APPLE__)
+  if (platform::command_exists("sox")) {
+    args = {"sox", "-q",     "-d",    "-r", "16000", "-c", "1", "-b", "16", "-e", "signed-integer",
+            "-t",  "wavpcm", wav_path};
+  }
+  else {
+    throw std::runtime_error("No recorder tool found (need sox: brew install sox)");
+  }
+#else
   if (platform::command_exists("pw-record")) {
     args = {"pw-record", "--format=s16", "--rate=16000", "--channels=1", wav_path};
   }
@@ -256,6 +265,7 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
   else {
     throw std::runtime_error("No recorder tool found (need pw-record or arecord)");
   }
+#endif
 
   pid_t pid = platform::spawn_process_background(args, err_path);
   if (pid == -1) {

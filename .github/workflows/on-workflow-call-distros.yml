@@ -126,3 +126,37 @@ jobs:
           set -euo pipefail
           ci_home=$(getent passwd ci | cut -d: -f6)
           test ! -e "${ci_home}/.local/bin/asryx"
+
+  smoke-macos:
+    name: macos-smoke
+    runs-on: macos-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: base runner (macos)
+        uses: ./.github/actions/base-runner-macos
+
+      - name: install
+        shell: bash
+        run: bash ./scripts/install
+
+      - name: verify install
+        shell: bash
+        run: |
+          set -euo pipefail
+          asryx_bin="${HOME}/.local/bin/asryx"
+
+          test -x "${asryx_bin}"
+          "${asryx_bin}" status | grep -qx 'idle'
+          "${asryx_bin}" --model list >/dev/null
+
+      - name: uninstall
+        shell: bash
+        run: bash ./scripts/uninstall
+
+      - name: verify uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "${HOME}/.local/bin/asryx"

@@ -8,13 +8,36 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: base runner
+      - name: base runner (linux)
+        if: runner.os == 'Linux'
         uses: ./.github/actions/base-runner
+
+      - name: base runner (macos)
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/base-runner-macos
+
+      - name: ccache dir
+        id: ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            dir="${HOME}/Library/Caches/ccache"
+          else
+            dir="${HOME}/.cache/ccache"
+          fi
+          mkdir -p "${dir}"
+          echo "dir=${dir}" >>"$GITHUB_OUTPUT"
 
       - name: cache install artifacts
         uses: actions/cache@v4
@@ -23,6 +46,7 @@ jobs:
             ~/.local/opt/whisper.cpp
             ~/.local/share/asryx
             ~/.cache/ccache
+            ~/Library/Caches/ccache
           key: ${{ runner.os }}-install-${{ hashFiles('scripts/install') }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ${{ runner.os }}-install-${{ hashFiles('scripts/install') }}-${{ github.job }}-
@@ -33,7 +57,7 @@ jobs:
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
-          CCACHE_DIR: /home/runner/.cache/ccache
+          CCACHE_DIR: ${{ steps.ccache.outputs.dir }}
           CCACHE_COMPRESS: "true"
           CCACHE_MAXSIZE: 1G
         run: bash ./scripts/install

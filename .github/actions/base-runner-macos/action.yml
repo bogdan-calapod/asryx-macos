@@ -1,0 +1,23 @@
+name: base runner (macOS)
+
+description: install the fixed macos ci toolchain
+
+runs:
+  using: composite
+  steps:
+    - name: install ci toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        brew update
+        brew install \
+          cmake \
+          ninja \
+          just \
+          sox \
+          ccache \
+          cppcheck \
+          shellcheck \
+          coreutils
+        brew install --quiet llvm
+        printf '%s/bin\n' "$(brew --prefix llvm)" >>"$GITHUB_PATH"

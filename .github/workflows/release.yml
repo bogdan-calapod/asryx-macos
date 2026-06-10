@@ -1,0 +1,82 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-source-tarball:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "tag '${tag}' is not a valid v<semver> tag" >&2
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+
+      - name: build source tarball
+        id: tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tarball="asryx-${version}.tar.gz"
+          git archive \
+            --format=tar.gz \
+            --prefix="asryx-${version}/" \
+            -o "${tarball}" \
+            "${{ steps.version.outputs.tag }}"
+          sha256="$(sha256sum "${tarball}" | awk '{print $1}')"
+          echo "tarball=${tarball}" >>"$GITHUB_OUTPUT"
+          echo "sha256=${sha256}" >>"$GITHUB_OUTPUT"
+
+      - name: write release summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### asryx ${{ steps.version.outputs.tag }}"
+            echo
+            echo "Source tarball: \`${{ steps.tarball.outputs.tarball }}\`"
+            echo
+            echo "sha256:"
+            echo
+            echo '```'
+            echo "${{ steps.tarball.outputs.sha256 }}"
+            echo '```'
+            echo
+            echo "Homebrew formula snippet:"
+            echo
+            echo '```ruby'
+            echo "url \"https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/${{ steps.tarball.outputs.tarball }}\""
+            echo "sha256 \"${{ steps.tarball.outputs.sha256 }}\""
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "${{ steps.tarball.outputs.tarball }}" \
+            --title "asryx ${{ steps.version.outputs.tag }}" \
+            --generate-notes
