@@ -137,6 +137,7 @@ jobs:
                 -DCMAKE_BUILD_TYPE=Release
                 -DASRYX_WHISPER_SOURCE_DIR=#{libexec}/whisper.cpp
                 -DASRYX_WHISPER_SOURCE_DIR_DEFAULT=#{libexec}/whisper.cpp
+                -DGGML_CCACHE=OFF
               ]
 
               system "cmake", "-S", ".", "-B", "build", *args
@@ -182,11 +183,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet Formula/asryx.rb; then
+          git add Formula/asryx.rb
+
+          if git diff --cached --quiet -- Formula/asryx.rb; then
             echo "formula already up to date"
             exit 0
           fi
 
-          git add Formula/asryx.rb
           git commit -m "asryx: update to ${{ steps.version.outputs.version }}"
           git push

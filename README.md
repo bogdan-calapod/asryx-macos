@@ -3,8 +3,8 @@
 # asryx
 
 <p align="center">
-  <a href="https://github.com/rccyx/asryx/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/rccyx/asryx/ci.yml?branch=main&style=for-the-badge&color=black&labelColor=111111&logo=githubactions&logoColor=white" alt="CI Status"/>
+  <a href="https://github.com/bogdan-calapod/asryx-macos/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/bogdan-calapod/asryx-macos/ci.yml?branch=main&style=for-the-badge&color=black&labelColor=111111&logo=githubactions&logoColor=white" alt="CI Status"/>
   </a>
   <a href="#installation">
     <img src="https://img.shields.io/badge/Platform-Linux-black?logo=linux&logoColor=white&style=for-the-badge&labelColor=111111" alt="Platform: Linux"/>
@@ -15,7 +15,7 @@
   <a href="#mechanism">
     <img src="https://img.shields.io/badge/Offline-100%25-black?logo=shield&logoColor=white&style=for-the-badge&labelColor=111111" alt="Offline"/>
   </a>
-  <a href="https://github.com/rccyx/asryx/blob/main/LICENSE">
+  <a href="https://github.com/bogdan-calapod/asryx-macos/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/License-Apache--2.0-black?logo=apache&logoColor=white&style=for-the-badge&labelColor=111111" alt="License: Apache-2.0"/>
   </a>
 </p>
@@ -203,8 +203,8 @@ After a completed transcription, runtime files are completely removed. The trans
 ### Linux
 
 ```bash
-git clone https://github.com/rccyx/asryx
-cd asryx && bash ./scripts/install
+git clone https://github.com/bogdan-calapod/asryx-macos
+cd asryx-macos && bash ./scripts/install
 ```
 
 The installer validates the user environment, checks required tools, clones the pinned native inference source, builds the binary locally, installs the executable, writes the version pin, writes the default config, installs the default model, selects it, and prints a PATH note when `~/.local/bin` is unavailable from the current shell.
@@ -271,8 +271,8 @@ asryx status   # idle
 From source:
 
 ```bash
-git clone https://github.com/rccyx/asryx
-cd asryx && bash ./scripts/install
+git clone https://github.com/bogdan-calapod/asryx-macos
+cd asryx-macos && bash ./scripts/install
 ```
 
 The installer detects macOS, requires Homebrew and the Xcode Command Line Tools, and auto-installs missing build dependencies (`cmake`, `ninja`, `git`, `curl`, `sox`) before building and installing the binary at `~/.local/bin/asryx`.
