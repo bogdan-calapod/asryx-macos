@@ -280,6 +280,15 @@ The installer detects macOS, requires Homebrew and the Xcode Command Line Tools,
 > [!NOTE]
 > On macOS, the first invocation triggers a microphone permission prompt against the parent terminal application (Terminal.app, iTerm, Ghostty, etc.). Grant it in **System Settings > Privacy & Security > Microphone**. The same applies to notifications.
 
+### Releasing
+
+Pushing a `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which:
+
+1. Publishes a GitHub Release with auto-generated notes.
+2. Computes the sha256 of GitHub's source tarball, regenerates `bogdan-calapod/homebrew-tap/Formula/asryx.rb` with the new version and sha256, and pushes the formula update to the tap.
+
+The tap update step requires a repository secret named `HOMEBREW_TAP_TOKEN`: a fine-grained Personal Access Token with `contents:write` permission on `bogdan-calapod/homebrew-tap`.
+
 ## Dependencies
 
 You probably have most of these already, but check.
