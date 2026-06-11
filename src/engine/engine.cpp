@@ -113,13 +113,17 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
 #if defined(__APPLE__)
   const auto cfg = config::load_config();
   auto mode = platform::audio::CaptureMode::All;
-  if (!platform::audio::has_screen_recording_permission()) {
+  // Triggers the native "asryx would like to record this computer's screen"
+  // dialog on first invocation. Returns the current permission state, which
+  // is typically false on first run even when the user is about to grant.
+  if (!platform::audio::request_screen_recording_permission()) {
     if (!cfg.mic_only_fallback) {
       platform::audio::open_screen_recording_settings();
       throw std::runtime_error(
-          "asryx needs Screen Recording permission. Grant access in System Settings "
-          "> Privacy & Security > Screen Recording (or set mic_only_fallback=true in "
-          "~/.asryx.conf to capture mic only).");
+          "asryx needs Screen Recording permission. Grant access in the dialog (or "
+          "in System Settings > Privacy & Security > Screen Recording) and run "
+          "asryx again. Set mic_only_fallback=true in ~/.asryx.conf to capture mic "
+          "only when permission is missing.");
     }
     mode = platform::audio::CaptureMode::Mic;
   }

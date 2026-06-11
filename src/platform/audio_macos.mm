@@ -600,6 +600,11 @@ bool has_screen_recording_permission()
   return CGPreflightScreenCaptureAccess() == TRUE;
 }
 
+bool request_screen_recording_permission()
+{
+  return CGRequestScreenCaptureAccess() == TRUE;
+}
+
 void open_screen_recording_settings()
 {
   (void)platform::run_process_blocking(

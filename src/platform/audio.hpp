@@ -17,6 +17,13 @@ enum class CaptureMode
 // True if the running process has Screen Recording permission. Fast, no prompt.
 bool has_screen_recording_permission();
 
+// Triggers the standard macOS Screen Recording permission dialog (if it has
+// not yet been shown for this binary). Returns whether access is granted at
+// the time of the call. On the first invocation the user sees the dialog
+// asynchronously, so the return value is typically false even when the user
+// is about to grant access; the caller must re-run asryx after granting.
+bool request_screen_recording_permission();
+
 // Opens System Settings > Privacy & Security > Screen Recording.
 // Non-blocking. Best effort.
 void open_screen_recording_settings();
