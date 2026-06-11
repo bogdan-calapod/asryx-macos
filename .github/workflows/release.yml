@@ -155,10 +155,15 @@ jobs:
                 cp_r ".", libexec/"sherpa-onnx"
               end
 
+              # Sherpa-onnx vendors several deps via FetchContent (json,
+              # hclust_cpp, eigen, kaldi-decoder, ...). Homebrew traps these
+              # by default; opting in here is the documented mechanism rather
+              # than mirroring ~10 resources by hand.
               args = std_cmake_args + %W[
                 -G Ninja
                 -DCMAKE_BUILD_TYPE=Release
                 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4
+                -DHOMEBREW_ALLOW_FETCHCONTENT=ON
                 -DASRYX_WHISPER_SOURCE_DIR=#{libexec}/whisper.cpp
                 -DASRYX_WHISPER_SOURCE_DIR_DEFAULT=#{libexec}/whisper.cpp
                 -DASRYX_SHERPA_SOURCE_DIR=#{libexec}/sherpa-onnx
