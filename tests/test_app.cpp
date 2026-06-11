@@ -1,6 +1,7 @@
 #include "app/app.hpp"
 #include "config/config.hpp"
 #include "constants/constants.hpp"
+#include "engine/engine.hpp"
 #include "model/model.hpp"
 #include "platform/fs.hpp"
 #include "platform/process.hpp"
@@ -83,6 +84,18 @@ void stop_started_recording()
   clean_runtime_files();
 }
 
+// Spawn a long-sleeping subprocess that touches the wav path and waits for
+// SIGINT/SIGTERM. Acts as a platform-neutral stand-in for the real capture
+// backend (sox on Linux, AVAudioEngine+ScreenCaptureKit on macOS) so this
+// test doesn't depend on real audio devices or system permissions.
+pid_t fake_capture_start(const std::string& wav_path, const std::string& err_path)
+{
+  std::vector<std::string> args = {
+      "sh", "-c", "wav=\"$1\"; : > \"$wav\"; trap 'exit 0' INT TERM; while :; do sleep 1; done",
+      "asryx-test-capture", wav_path};
+  return platform::spawn_process_background(args, err_path);
+}
+
 } // namespace
 
 void run_test_app()
@@ -90,6 +103,9 @@ void run_test_app()
   write_fake_model();
   reset_config();
   clean_runtime_files();
+
+  engine::testing::reset_hooks();
+  engine::testing::set_start_recording_hook(fake_capture_start);
 
   runtime::testing::reset_toggle_entry_count();
   ASSERT_EQ(app::run({}), 0);
@@ -127,5 +143,6 @@ void run_test_app()
   ASSERT_FALSE(recording_files_exist());
 
   delete_fake_model();
+  engine::testing::reset_hooks();
   std::cout << "test_app passed\n";
 }

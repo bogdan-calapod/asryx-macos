@@ -42,6 +42,9 @@ Config load_config()
     else if (key == constants::config::pipe_to_key) {
       cfg.pipe_to = val;
     }
+    else if (key == constants::config::mic_only_fallback_key) {
+      cfg.mic_only_fallback = (val == "1" || val == "true" || val == "yes" || val == "on");
+    }
   }
 
   return cfg;
@@ -63,6 +66,8 @@ void save_config(const Config& cfg)
     file << constants::config::model_key << "=" << cfg.model << "\n";
     file << constants::config::language_key << "=" << cfg.language << "\n";
     file << constants::config::pipe_to_key << "=" << cfg.pipe_to << "\n";
+    file << constants::config::mic_only_fallback_key << "="
+         << (cfg.mic_only_fallback ? "true" : "false") << "\n";
   }
 
   std::filesystem::rename(tmp_path, path);

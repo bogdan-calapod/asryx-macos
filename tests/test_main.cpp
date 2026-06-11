@@ -41,19 +41,6 @@ int main()
                   "while :; do sleep 1; done\n";
     }
     {
-      std::ofstream recorder(bin_path / "sox");
-      recorder << "#!/bin/sh\n"
-                  "wav=\"\"\n"
-                  "for arg do\n"
-                  "  case \"$arg\" in\n"
-                  "    *.wav) wav=\"$arg\" ;;\n"
-                  "  esac\n"
-                  "done\n"
-                  "[ -n \"$wav\" ] && : > \"$wav\"\n"
-                  "trap 'exit 0' INT TERM\n"
-                  "while :; do sleep 1; done\n";
-    }
-    {
       std::ofstream clipboard(bin_path / "wl-copy");
       clipboard << "#!/bin/sh\ncat >/dev/null\n";
     }
@@ -74,7 +61,6 @@ int main()
                                    std::filesystem::perm_options::add);
     };
     add_exec(bin_path / "pw-record");
-    add_exec(bin_path / "sox");
     add_exec(bin_path / "wl-copy");
     add_exec(bin_path / "pbcopy");
     add_exec(bin_path / "notify-send");

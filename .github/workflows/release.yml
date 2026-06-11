@@ -119,7 +119,7 @@ jobs:
             depends_on "cmake"      => :build
             depends_on "ninja"      => :build
             depends_on "pkg-config" => :build
-            depends_on "sox"
+            depends_on :macos       => :ventura
 
             resource "whisper-cpp" do
               url "https://github.com/ggerganov/whisper.cpp.git",
@@ -135,6 +135,7 @@ jobs:
               args = std_cmake_args + %W[
                 -G Ninja
                 -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
                 -DASRYX_WHISPER_SOURCE_DIR=#{libexec}/whisper.cpp
                 -DASRYX_WHISPER_SOURCE_DIR_DEFAULT=#{libexec}/whisper.cpp
                 -DGGML_CCACHE=OFF
@@ -159,9 +160,19 @@ jobs:
                   asryx --model use base.en
                   asryx status   # should print: idle
 
-                On first invocation, macOS will prompt your terminal application
-                (Terminal.app, iTerm, Ghostty, etc.) for microphone access.
-                Grant it in System Settings > Privacy & Security > Microphone.
+                Permissions (one-time, prompted on first toggle):
+
+                  - Microphone (your terminal app: Terminal.app, iTerm, Ghostty, ...)
+                  - Screen Recording (asryx itself)
+
+                Both are required to transcribe the full conversation in calls
+                (your voice + the other participants). Grant them in
+                System Settings > Privacy & Security.
+
+                If you'd rather skip Screen Recording entirely and only capture
+                your microphone, add to ~/.asryx.conf:
+
+                  mic_only_fallback=true
 
                 Bind 'asryx' to a hotkey via Karabiner-Elements, Hammerspoon, Raycast,
                 or skhd to toggle recording and transcription.

@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(asryx LANGUAGES CXX)
+if(APPLE)
+  if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment target" FORCE)
+  endif()
+  project(asryx LANGUAGES CXX OBJCXX)
+else()
+  project(asryx LANGUAGES CXX)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -41,6 +48,11 @@ add_subdirectory("${ASRYX_WHISPER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/whisper.cpp"
 file(GLOB_RECURSE ASRYX_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
 file(GLOB_RECURSE ASRYX_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.hpp")
 
+if(APPLE)
+  file(GLOB_RECURSE ASRYX_OBJCXX_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.mm")
+  list(APPEND ASRYX_SOURCES ${ASRYX_OBJCXX_SOURCES})
+endif()
+
 add_executable(asryx ${ASRYX_SOURCES} ${ASRYX_HEADERS})
 target_include_directories(asryx PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_compile_definitions(
@@ -50,6 +62,20 @@ target_compile_definitions(
     ASRYX_WHISPER_SOURCE_DIR_DEFAULT="${ASRYX_WHISPER_SOURCE_DIR_DEFAULT}"
 )
 target_link_libraries(asryx PRIVATE whisper)
+
+if(APPLE)
+  target_link_libraries(
+    asryx
+    PRIVATE
+      "-framework Foundation"
+      "-framework AVFoundation"
+      "-framework CoreMedia"
+      "-framework CoreAudio"
+      "-framework CoreGraphics"
+      "-framework AudioToolbox"
+      "-framework ScreenCaptureKit"
+  )
+endif()
 
 asryx_enable_warnings(asryx)
 asryx_enable_hardening(asryx)

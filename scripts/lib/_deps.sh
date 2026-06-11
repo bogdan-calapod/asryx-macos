@@ -61,7 +61,8 @@ _asryx_brew_install_missing() {
 
 _asryx_require_audio_backend() {
   if _asryx_is_macos; then
-    _asryx_require_command sox
+    # macOS captures audio natively via AVAudioEngine + ScreenCaptureKit; no
+    # external recorder tool is needed.
     return 0
   fi
 
@@ -127,7 +128,7 @@ _asryx_require_runtime_dependencies_macos() {
   _asryx_require_homebrew
   _asryx_fail_if_missing_tools
 
-  _asryx_brew_install_missing cmake ninja git curl sox
+  _asryx_brew_install_missing cmake ninja git curl
 
   _asryx_require_command git
   _asryx_require_command cmake

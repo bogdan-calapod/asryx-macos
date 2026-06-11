@@ -12,6 +12,7 @@ struct Config
   std::string model = std::string(constants::config::default_model);
   std::string language = std::string(constants::config::default_language);
   std::string pipe_to;
+  bool mic_only_fallback = false;
 };
 
 Config load_config();

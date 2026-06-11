@@ -1,18 +1,20 @@
 #include "engine/engine.hpp"
 
+#include "config/config.hpp"
 #include "constants/constants.hpp"
+#include "engine/wav.hpp"
 #include "platform/process.hpp"
+
+#if defined(__APPLE__)
+#  include "platform/audio.hpp"
+#endif
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
-#include <cstdint>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -43,144 +45,6 @@ namespace {
 #else
 #  define ASRYX_TEST_HOOK(name, ...)
 #endif
-
-constexpr std::uint16_t wav_pcm = 1;
-constexpr std::uint16_t wav_extensible = 65534;
-constexpr float pcm16_scale = 32768.0F;
-
-bool chunk_is(const std::vector<std::uint8_t>& bytes, size_t offset, const char* id)
-{
-  return offset + 4 <= bytes.size() && std::memcmp(bytes.data() + offset, id, 4) == 0;
-}
-
-std::uint16_t read_u16_le(const std::vector<std::uint8_t>& bytes, size_t offset)
-{
-  if (offset + 2 > bytes.size()) {
-    throw std::runtime_error("invalid wav header");
-  }
-
-  return static_cast<std::uint16_t>(bytes[offset]) |
-         static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[offset + 1]) << 8U);
-}
-
-std::uint32_t read_u32_le(const std::vector<std::uint8_t>& bytes, size_t offset)
-{
-  if (offset + 4 > bytes.size()) {
-    throw std::runtime_error("invalid wav header");
-  }
-
-  return static_cast<std::uint32_t>(bytes[offset]) |
-         (static_cast<std::uint32_t>(bytes[offset + 1]) << 8U) |
-         (static_cast<std::uint32_t>(bytes[offset + 2]) << 16U) |
-         (static_cast<std::uint32_t>(bytes[offset + 3]) << 24U);
-}
-
-std::vector<std::uint8_t> read_file(const std::string& path)
-{
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    throw std::runtime_error("failed to open wav file: " + path);
-  }
-
-  std::vector<std::uint8_t> bytes(std::istreambuf_iterator<char>(file),
-                                  std::istreambuf_iterator<char>{});
-  return bytes;
-}
-
-void validate_wav_format(std::uint16_t audio_format, std::uint16_t channels,
-                         std::uint32_t sample_rate, std::uint16_t bits_per_sample)
-{
-  const bool supported_format = audio_format == wav_pcm || audio_format == wav_extensible;
-  if (!supported_format) {
-    throw std::runtime_error("unsupported wav format: expected PCM");
-  }
-
-  if (channels != 1 || sample_rate != WHISPER_SAMPLE_RATE || bits_per_sample != 16) {
-    throw std::runtime_error("unsupported wav format: expected 16 kHz mono s16 PCM");
-  }
-}
-
-std::vector<float> decode_pcm16(const std::vector<std::uint8_t>& bytes, size_t data_offset,
-                                size_t data_size)
-{
-  data_size -= data_size % 2U;
-
-  std::vector<float> samples;
-  samples.reserve(data_size / 2U);
-
-  for (size_t i = data_offset; i < data_offset + data_size; i += 2) {
-    const auto high = static_cast<std::uint16_t>(bytes[i + 1]);
-    const auto low = static_cast<std::uint16_t>(bytes[i]);
-    const auto raw = static_cast<std::uint16_t>(low | static_cast<std::uint16_t>(high << 8U));
-    const auto sample = static_cast<std::int16_t>(raw);
-    samples.push_back(static_cast<float>(sample) / pcm16_scale);
-  }
-
-  return samples;
-}
-
-std::vector<float> read_pcm16_wav(const std::string& path)
-{
-  const auto bytes = read_file(path);
-
-  if (bytes.size() < 44 || !chunk_is(bytes, 0, "RIFF") || !chunk_is(bytes, 8, "WAVE")) {
-    throw std::runtime_error("unsupported wav file: expected RIFF/WAVE");
-  }
-
-  bool found_fmt = false;
-  bool found_data = false;
-
-  std::uint16_t audio_format = 0;
-  std::uint16_t channels = 0;
-  std::uint32_t sample_rate = 0;
-  std::uint16_t bits_per_sample = 0;
-
-  size_t data_offset = 0;
-  size_t data_size = 0;
-
-  size_t offset = 12;
-  while (offset + 8 <= bytes.size()) {
-    const std::uint32_t declared_size = read_u32_le(bytes, offset + 4);
-    const size_t chunk_data = offset + 8;
-    const size_t remaining = bytes.size() - chunk_data;
-
-    if (chunk_is(bytes, offset, "fmt ")) {
-      if (declared_size > remaining || declared_size < 16) {
-        throw std::runtime_error("invalid wav fmt chunk");
-      }
-
-      audio_format = read_u16_le(bytes, chunk_data);
-      channels = read_u16_le(bytes, chunk_data + 2);
-      sample_rate = read_u32_le(bytes, chunk_data + 4);
-      bits_per_sample = read_u16_le(bytes, chunk_data + 14);
-      found_fmt = true;
-    }
-    else if (chunk_is(bytes, offset, "data")) {
-      data_offset = chunk_data;
-      if (declared_size == 0 || declared_size > remaining) {
-        data_size = remaining;
-      }
-      else {
-        data_size = static_cast<size_t>(declared_size);
-      }
-      found_data = true;
-      break;
-    }
-
-    if (declared_size > remaining) {
-      break;
-    }
-
-    offset = chunk_data + declared_size + (declared_size % 2U);
-  }
-
-  if (!found_fmt || !found_data) {
-    throw std::runtime_error("invalid wav file: missing fmt or data chunk");
-  }
-
-  validate_wav_format(audio_format, channels, sample_rate, bits_per_sample);
-  return decode_pcm16(bytes, data_offset, data_size);
-}
 
 bool wait_until_recorder_exits(pid_t pid)
 {
@@ -246,16 +110,22 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
 {
   ASRYX_TEST_HOOK(start_recording_hook, wav_path, err_path);
 
-  std::vector<std::string> args;
 #if defined(__APPLE__)
-  if (platform::command_exists("sox")) {
-    args = {"sox", "-q",     "-d",    "-r", "16000", "-c", "1", "-b", "16", "-e", "signed-integer",
-            "-t",  "wavpcm", wav_path};
+  const auto cfg = config::load_config();
+  auto mode = platform::audio::CaptureMode::All;
+  if (!platform::audio::has_screen_recording_permission()) {
+    if (!cfg.mic_only_fallback) {
+      platform::audio::open_screen_recording_settings();
+      throw std::runtime_error(
+          "asryx needs Screen Recording permission. Grant access in System Settings "
+          "> Privacy & Security > Screen Recording (or set mic_only_fallback=true in "
+          "~/.asryx.conf to capture mic only).");
+    }
+    mode = platform::audio::CaptureMode::Mic;
   }
-  else {
-    throw std::runtime_error("No recorder tool found (need sox: brew install sox)");
-  }
+  pid_t pid = platform::audio::spawn_capture(mode, wav_path, err_path);
 #else
+  std::vector<std::string> args;
   if (platform::command_exists("pw-record")) {
     args = {"pw-record", "--format=s16", "--rate=16000", "--channels=1", wav_path};
   }
@@ -265,13 +135,11 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
   else {
     throw std::runtime_error("No recorder tool found (need pw-record or arecord)");
   }
-#endif
-
   pid_t pid = platform::spawn_process_background(args, err_path);
+#endif
   if (pid == -1) {
     throw std::runtime_error("Failed to start recorder process");
   }
-
   return pid;
 }
 

@@ -3,6 +3,11 @@ file(GLOB_RECURSE TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 file(GLOB_RECURSE ASRYX_CORE_SOURCES "${PROJECT_SOURCE_DIR}/src/*.cpp")
 list(REMOVE_ITEM ASRYX_CORE_SOURCES "${PROJECT_SOURCE_DIR}/src/main.cpp")
 
+if(APPLE)
+  file(GLOB_RECURSE ASRYX_OBJCXX_TEST_SOURCES "${PROJECT_SOURCE_DIR}/src/*.mm")
+  list(APPEND ASRYX_CORE_SOURCES ${ASRYX_OBJCXX_TEST_SOURCES})
+endif()
+
 add_executable(asryx_tests ${TEST_SOURCES} ${ASRYX_CORE_SOURCES})
 target_include_directories(
   asryx_tests
@@ -15,6 +20,20 @@ target_compile_definitions(
     ASRYX_WHISPER_SOURCE_DIR_DEFAULT="${ASRYX_WHISPER_SOURCE_DIR_DEFAULT}"
 )
 target_link_libraries(asryx_tests PRIVATE whisper)
+
+if(APPLE)
+  target_link_libraries(
+    asryx_tests
+    PRIVATE
+      "-framework Foundation"
+      "-framework AVFoundation"
+      "-framework CoreMedia"
+      "-framework CoreAudio"
+      "-framework CoreGraphics"
+      "-framework AudioToolbox"
+      "-framework ScreenCaptureKit"
+  )
+endif()
 
 asryx_enable_warnings(asryx_tests)
 asryx_enable_hardening(asryx_tests)

@@ -147,10 +147,11 @@ ALSA is used as fallback:
 arecord
 ```
 
-On macOS, audio capture uses `sox` against the default CoreAudio input device:
+On macOS, audio capture is native: `AVAudioEngine` taps the default microphone and `ScreenCaptureKit` captures system audio. Both streams are converted to 16 kHz mono signed-16 PCM in process and mixed into a single track before transcription. There is no external recorder binary on the macOS path.
 
 ```text
-sox -d -r 16000 -c 1 -b 16
+AVAudioEngine        # microphone
+ScreenCaptureKit     # system audio (Zoom, Meet, Teams, browsers, etc.)
 ```
 
 Clipboard backends:
@@ -275,10 +276,16 @@ git clone https://github.com/bogdan-calapod/asryx-macos
 cd asryx-macos && bash ./scripts/install
 ```
 
-The installer detects macOS, requires Homebrew and the Xcode Command Line Tools, and auto-installs missing build dependencies (`cmake`, `ninja`, `git`, `curl`, `sox`) before building and installing the binary at `~/.local/bin/asryx`.
+The installer detects macOS, requires Homebrew and the Xcode Command Line Tools, and auto-installs missing build dependencies (`cmake`, `ninja`, `git`, `curl`) before building and installing the binary at `~/.local/bin/asryx`.
 
 > [!NOTE]
-> On macOS, the first invocation triggers a microphone permission prompt against the parent terminal application (Terminal.app, iTerm, Ghostty, etc.). Grant it in **System Settings > Privacy & Security > Microphone**. The same applies to notifications.
+> On macOS, asryx captures both your microphone and the system's audio output (so you can transcribe entire calls, not just your own voice). The first toggle triggers two permission prompts:
+> - **Microphone**, against the parent terminal application (Terminal.app, iTerm, Ghostty, …)
+> - **Screen Recording**, against `asryx` itself
+>
+> Grant both in **System Settings > Privacy & Security**. The "Screen Recording" permission is named that way by macOS because `ScreenCaptureKit` is the framework used; asryx never reads or stores any image, video, or window content.
+>
+> If you prefer to skip Screen Recording entirely and only capture your own microphone, set `mic_only_fallback=true` in `~/.asryx.conf`. asryx will then transcribe just your voice whenever the permission is missing.
 
 ### Releasing
 
@@ -331,15 +338,18 @@ cmake
 ninja
 git
 curl
-sox                        # audio capture
 ```
 
 Runtime built-ins (always present on macOS):
 
 ```text
-pbcopy        # clipboard
-osascript     # notifications
+AVAudioEngine        # microphone capture (AVFoundation framework)
+ScreenCaptureKit     # system audio capture (ScreenCaptureKit framework)
+pbcopy               # clipboard
+osascript            # notifications
 ```
+
+Minimum macOS version: **13.0 (Ventura)** for ScreenCaptureKit audio capture.
 
 ## Keybind
 
@@ -548,6 +558,10 @@ asryx --model use small.en
 **Language**
 
 `language` controls transcription language. `auto` detects the language first, which adds a small amount of unnecessary latency if you speak the same language all the time. Locking to a code skips detection entirely.
+
+**mic_only_fallback** (macOS only)
+
+`mic_only_fallback=true` makes asryx fall back to mic-only capture when Screen Recording permission is missing, instead of failing. Default is `false` (hard fail with an instructive error). Set it if you don't intend to transcribe call audio and want to skip the second permission prompt.
 
 ```bash
 asryx --language es
