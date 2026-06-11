@@ -385,29 +385,65 @@ bool CaptureSession::start()
 
     // System audio via ScreenCaptureKit (optional).
     if (include_system()) {
-      __block SCShareableContent* sharedContent = nil;
+      std::cerr << "asryx: fetching ScreenCaptureKit shareable content...\n";
+      std::cerr.flush();
+      __block NSArray<SCDisplay*>* displays = nil;
       __block NSError* shareErr = nil;
       dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+      // Reading sharedContent.displays after the completion fires has been
+      // observed to crash on macOS 26+ for ad-hoc signed binaries (pointer
+      // authentication failure on the XPC-delivered display array). Copy the
+      // displays out of the SCShareableContent into our own retained array
+      // inside the completion handler, while the XPC connection is still
+      // alive and the autorelease pool that owns the reply data is still
+      // valid.
       [SCShareableContent
           getShareableContentExcludingDesktopWindows:NO
                                  onScreenWindowsOnly:NO
                                    completionHandler:^(SCShareableContent* content, NSError* err) {
-                                     sharedContent = content;
                                      shareErr = err;
+                                     if (content != nil) {
+                                       @try {
+                                         displays = [content.displays copy];
+                                       }
+                                       @catch (NSException* ex) {
+                                         // leave displays nil; outer checks bail
+                                       }
+                                     }
                                      dispatch_semaphore_signal(sem);
                                    }];
-      dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5LL * NSEC_PER_SEC));
+      long waitResult =
+          dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5LL * NSEC_PER_SEC));
+      std::cerr << "asryx: shareable content fetch returned (wait=" << waitResult << ")\n";
+      std::cerr.flush();
 
-      if (sharedContent == nil || sharedContent.displays.count == 0) {
-        std::cerr << "asryx: ScreenCaptureKit reported no shareable displays"
-                  << (shareErr != nil ? std::string(": ") +
-                                            [[shareErr localizedDescription] UTF8String]
-                                      : std::string())
-                  << "\n";
+      if (waitResult != 0) {
+        std::cerr << "asryx: ScreenCaptureKit shareable-content fetch timed out (5s)\n";
         return false;
       }
 
-      SCDisplay* display = sharedContent.displays.firstObject;
+      if (shareErr != nil) {
+        std::cerr << "asryx: ScreenCaptureKit fetch failed: "
+                  << [[shareErr localizedDescription] UTF8String] << "\n";
+        return false;
+      }
+
+      if (displays == nil || displays.count == 0) {
+        std::cerr << "asryx: ScreenCaptureKit returned no displays (permission likely "
+                     "missing; grant Screen Recording for asryx and rerun)\n";
+        return false;
+      }
+
+      std::cerr << "asryx: got " << displays.count << " display(s)\n";
+      std::cerr.flush();
+      SCDisplay* display = displays.firstObject;
+      if (display == nil) {
+        std::cerr << "asryx: ScreenCaptureKit returned nil display\n";
+        return false;
+      }
+
+      std::cerr << "asryx: constructing content filter...\n";
+      std::cerr.flush();
       SCContentFilter* filter =
           [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
 
@@ -629,6 +665,10 @@ pid_t spawn_capture(CaptureMode mode, const std::string& wav_path, const std::st
 
 int run_capture_child(CaptureMode mode, const std::string& wav_path)
 {
+  std::cerr << "asryx: capture child started (mode="
+            << (mode == CaptureMode::All ? "all" : "mic") << ", wav=" << wav_path << ")\n";
+  std::cerr.flush();
+
   struct sigaction sa{};
   sa.sa_handler = handle_signal;
   sigemptyset(&sa.sa_mask);
@@ -642,11 +682,17 @@ int run_capture_child(CaptureMode mode, const std::string& wav_path)
     return 1;
   }
 
+  std::cerr << "asryx: starting capture session...\n";
+  std::cerr.flush();
+
   CaptureSession session(mode, wav_path);
   if (!session.start()) {
     std::cerr << "asryx: failed to start capture session\n";
     return 1;
   }
+
+  std::cerr << "asryx: capture session started, awaiting stop signal\n";
+  std::cerr.flush();
 
   {
     std::lock_guard<std::mutex> lock(g_session_mutex);
