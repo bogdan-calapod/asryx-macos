@@ -71,6 +71,18 @@ jobs:
           fi
           echo "sha=${sha}" >>"$GITHUB_OUTPUT"
 
+      - name: read pinned sherpa-onnx sha
+        id: sherpa
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' <versions/sherpa-onnx-sha)"
+          if [[ -z "${sha}" ]]; then
+            echo "versions/sherpa-onnx-sha is empty" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >>"$GITHUB_OUTPUT"
+
       - name: download source tarball and compute sha256
         id: sha256
         shell: bash
@@ -104,6 +116,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           SOURCE_SHA256: ${{ steps.sha256.outputs.sha256 }}
           WHISPER_SHA: ${{ steps.whisper.outputs.sha }}
+          SHERPA_SHA: ${{ steps.sherpa.outputs.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -126,18 +139,30 @@ jobs:
                   revision: "${WHISPER_SHA}"
             end
 
+            resource "sherpa-onnx" do
+              url "https://github.com/k2-fsa/sherpa-onnx.git",
+                  revision: "${SHERPA_SHA}"
+            end
+
             def install
               (libexec/"whisper.cpp").mkpath
               resource("whisper-cpp").stage do
                 cp_r ".", libexec/"whisper.cpp"
               end
 
+              (libexec/"sherpa-onnx").mkpath
+              resource("sherpa-onnx").stage do
+                cp_r ".", libexec/"sherpa-onnx"
+              end
+
               args = std_cmake_args + %W[
                 -G Ninja
                 -DCMAKE_BUILD_TYPE=Release
-                -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4
                 -DASRYX_WHISPER_SOURCE_DIR=#{libexec}/whisper.cpp
                 -DASRYX_WHISPER_SOURCE_DIR_DEFAULT=#{libexec}/whisper.cpp
+                -DASRYX_SHERPA_SOURCE_DIR=#{libexec}/sherpa-onnx
+                -DASRYX_SHERPA_SOURCE_DIR_DEFAULT=#{libexec}/sherpa-onnx
                 -DGGML_CCACHE=OFF
               ]
 
@@ -150,14 +175,17 @@ jobs:
               <<~CAVEATS
                 asryx stores user data under your home directory:
                   ~/.local/share/asryx           downloaded GGML models
+                  ~/.local/share/asryx/diarize   downloaded diarization models
                   ~/.cache/asryx                 cache
                   ~/.asryx.conf                  config (written on first model install)
                   /tmp/asryx-\$UID                runtime state
 
-                First-time setup:
+                First-time setup (transcription model + speaker diarization models):
 
                   asryx --model install base.en
                   asryx --model use base.en
+                  asryx --diarize install pyannote-segmentation-3-0
+                  asryx --diarize install wespeaker-voxceleb-resnet34
                   asryx status   # should print: idle
 
                 Permissions (one-time, prompted on first toggle):
@@ -165,14 +193,18 @@ jobs:
                   - Microphone (your terminal app: Terminal.app, iTerm, Ghostty, ...)
                   - Screen Recording (asryx itself)
 
-                Both are required to transcribe the full conversation in calls
-                (your voice + the other participants). Grant them in
+                Both are required to capture and label the full conversation in
+                calls (your voice + the other participants). Grant them in
                 System Settings > Privacy & Security.
 
                 If you'd rather skip Screen Recording entirely and only capture
                 your microphone, add to ~/.asryx.conf:
 
                   mic_only_fallback=true
+
+                Output format: clipboard receives human-readable dialogue
+                ("You: ...", "Speaker 1: ...") and pipe_to receives JSON
+                conforming to asryx_schema_version 1.
 
                 Bind 'asryx' to a hotkey via Karabiner-Elements, Hammerspoon, Raycast,
                 or skhd to toggle recording and transcription.

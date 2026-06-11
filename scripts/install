@@ -17,10 +17,18 @@ export GIT_TERMINAL_PROMPT=0
 model_name="${ASRYX_DEFAULT_MODEL}"
 whisper_url="https://github.com/ggerganov/whisper.cpp.git"
 whisper_dir="$(_asryx_home_path "${ASRYX_WHISPER_DIR_REL}")"
+sherpa_url="https://github.com/k2-fsa/sherpa-onnx.git"
+sherpa_dir="$(_asryx_home_path "${ASRYX_SHERPA_DIR_REL}")"
 
 read_whisper_sha() {
   local path="${repo_dir}/versions/whisper-cpp-sha"
   [[ -s "${path}" ]] || _asryx_die "missing whisper.cpp pin: ${path}"
+  tr -d '[:space:]' <"${path}"
+}
+
+read_sherpa_sha() {
+  local path="${repo_dir}/versions/sherpa-onnx-sha"
+  [[ -s "${path}" ]] || _asryx_die "missing sherpa-onnx pin: ${path}"
   tr -d '[:space:]' <"${path}"
 }
 
@@ -45,6 +53,28 @@ sync_whisper_repo() {
   git -C "${whisper_dir}" checkout --detach "${whisper_sha}"
   git -C "${whisper_dir}" fsck --no-progress
   git -C "${whisper_dir}" submodule update --init --recursive
+}
+
+sync_sherpa_repo() {
+  local sherpa_sha="$1"
+
+  _asryx_ensure_dir "$(_asryx_home_path "${ASRYX_LOCAL_OPT_DIR_REL}")"
+
+  if [[ -d "${sherpa_dir}/.git" ]]; then
+    _asryx_log "updating sherpa-onnx"
+    git -C "${sherpa_dir}" fetch --depth 1 origin "${sherpa_sha}"
+  else
+    if [[ -e "${sherpa_dir}" ]]; then
+      _asryx_die "${sherpa_dir} exists but is not a git checkout"
+    fi
+
+    _asryx_log "cloning sherpa-onnx"
+    git clone "${sherpa_url}" "${sherpa_dir}"
+    git -C "${sherpa_dir}" fetch --depth 1 origin "${sherpa_sha}"
+  fi
+
+  git -C "${sherpa_dir}" checkout --detach "${sherpa_sha}"
+  git -C "${sherpa_dir}" fsck --no-progress
 }
 
 build_asryx() {
@@ -77,6 +107,19 @@ write_installed_whisper_pin() {
 
   _asryx_ensure_dir "${versions_dir}"
   printf '%s\n' "${whisper_sha}" >"${tmp}"
+  mv -f "${tmp}" "${pin_path}"
+}
+
+write_installed_sherpa_pin() {
+  local sherpa_sha="$1"
+  local versions_dir
+  versions_dir="$(dirname "$(_asryx_home_path "${ASRYX_SHERPA_PIN_REL}")")"
+  local pin_path
+  pin_path="$(_asryx_home_path "${ASRYX_SHERPA_PIN_REL}")"
+  local tmp="${pin_path}.tmp.$$"
+
+  _asryx_ensure_dir "${versions_dir}"
+  printf '%s\n' "${sherpa_sha}" >"${tmp}"
   mv -f "${tmp}" "${pin_path}"
 }
 
@@ -118,10 +161,16 @@ main() {
   whisper_sha="$(read_whisper_sha)"
   _asryx_log "whisper.cpp pin: ${whisper_sha}"
 
+  local sherpa_sha=""
+  sherpa_sha="$(read_sherpa_sha)"
+  _asryx_log "sherpa-onnx pin: ${sherpa_sha}"
+
   sync_whisper_repo "${whisper_sha}"
+  sync_sherpa_repo "${sherpa_sha}"
   build_asryx
   install_asryx_binary
   write_installed_whisper_pin "${whisper_sha}"
+  write_installed_sherpa_pin "${sherpa_sha}"
   write_default_config_if_missing
   install_and_select_model
   warn_path_if_needed

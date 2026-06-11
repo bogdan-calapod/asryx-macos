@@ -60,20 +60,13 @@ std::filesystem::path pipe_output_path()
 {
   return runtime_dir() / "pipe.out";
 }
-
 std::filesystem::path pipe_fail_marker_path()
 {
   return runtime_dir() / "pipe-failed.out";
 }
-
 pid_t dead_pid()
 {
   return 99999999;
-}
-
-void delete_if_exists(const std::filesystem::path& path)
-{
-  platform::safe_delete_file(path);
 }
 
 void clean_runtime()
@@ -81,12 +74,12 @@ void clean_runtime()
   engine::testing::reset_hooks();
   platform::safe_delete_directory(lock_dir());
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_pid_file)));
-  platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_wav_file)));
+  platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)));
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_error_file)));
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::state_file)));
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::error_log_file)));
-  delete_if_exists(pipe_output_path());
-  delete_if_exists(pipe_fail_marker_path());
+  platform::safe_delete_file(pipe_output_path());
+  platform::safe_delete_file(pipe_fail_marker_path());
   state() = TestState{};
 }
 
@@ -109,11 +102,15 @@ std::string read_text(const std::filesystem::path& path)
   return output;
 }
 
-pid_t fake_start(const std::string& wav_path, const std::string& err_path)
+pid_t fake_start(const std::string& mic_wav_path, const std::string& sys_wav_path,
+                 const std::string& err_path)
 {
   auto& s = state();
   ++s.start_calls;
-  write_text(wav_path, "fake wav");
+  write_text(mic_wav_path, "fake wav");
+  if (!sys_wav_path.empty()) {
+    write_text(sys_wav_path, "fake wav");
+  }
   write_text(err_path, "");
   s.last_started_pid = getpid();
   return s.last_started_pid;
@@ -125,12 +122,9 @@ bool fake_stop(pid_t pid)
   return pid == getpid();
 }
 
-std::string fake_transcribe(const std::string& model_path, const std::string& wav_path,
-                            const std::string& language)
+std::string fake_transcribe(const std::string& /*model_path*/, const std::string& /*wav*/,
+                            const std::string& /*language*/)
 {
-  (void)model_path;
-  (void)wav_path;
-  (void)language;
   auto& s = state();
   ++s.transcribe_calls;
   std::ifstream state_file(runtime_file(std::string(constants::runtime::state_file)));
@@ -138,6 +132,22 @@ std::string fake_transcribe(const std::string& model_path, const std::string& wa
   state_file >> runtime_state;
   s.saw_transcribing_state = runtime_state == constants::runtime::transcribing_state;
   return s.transcript;
+}
+
+std::vector<engine::TranscriptSegment> fake_transcribe_with_segments(const std::string& model_path,
+                                                                     const std::string& wav_path,
+                                                                     const std::string& language)
+{
+  // Mirrors fake_transcribe and returns one segment for non-empty mic wavs.
+  fake_transcribe(model_path, wav_path, language);
+  const std::string mic_name = std::string(constants::runtime::recorder_mic_wav_file);
+  const bool is_mic = std::filesystem::path(wav_path).filename().string() == mic_name;
+  if (!is_mic || !std::filesystem::exists(wav_path) || std::filesystem::file_size(wav_path) == 0) {
+    return {};
+  }
+  return {
+      engine::TranscriptSegment{0.0, 1.0, state().transcript}
+  };
 }
 
 bool fake_clipboard(const std::string& text)
@@ -161,6 +171,7 @@ void install_default_hooks()
   engine::testing::set_start_recording_hook(fake_start);
   engine::testing::set_stop_recording_hook(fake_stop);
   engine::testing::set_transcribe_hook(fake_transcribe);
+  engine::testing::set_transcribe_with_segments_hook(fake_transcribe_with_segments);
   engine::testing::set_copy_to_clipboard_hook(fake_clipboard);
   engine::testing::set_notification_hook(fake_notify);
 }
@@ -179,6 +190,11 @@ void reset_config(const std::string& pipe_to = "")
   config::Config cfg;
   cfg.language = std::string(constants::config::english_language);
   cfg.pipe_to = pipe_to;
+  // Tests assert against plain-text pipe payloads; the diarization JSON
+  // payload is exercised in dedicated tests for engine::format.
+  cfg.pipe_to_format = std::string(constants::config::format_plain);
+  cfg.clipboard_format = std::string(constants::config::format_plain);
+  cfg.diarize_enabled = false;
   config::save_config(cfg);
 }
 
@@ -200,7 +216,7 @@ bool runtime_payload_exists()
   return std::filesystem::exists(
              runtime_file(std::string(constants::runtime::recorder_pid_file))) ||
          std::filesystem::exists(
-             runtime_file(std::string(constants::runtime::recorder_wav_file))) ||
+             runtime_file(std::string(constants::runtime::recorder_mic_wav_file))) ||
          std::filesystem::exists(
              runtime_file(std::string(constants::runtime::recorder_error_file))) ||
          std::filesystem::exists(runtime_file(std::string(constants::runtime::state_file)));
@@ -255,7 +271,7 @@ void run_test_runtime()
   clean_runtime();
   install_default_hooks();
   write_pid_file(dead_pid());
-  write_text(runtime_file(std::string(constants::runtime::recorder_wav_file)), "stale wav");
+  write_text(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)), "stale wav");
   write_text(runtime_file(std::string(constants::runtime::recorder_error_file)), "stale err");
   write_text(runtime_file(std::string(constants::runtime::state_file)),
              std::string(constants::runtime::recording_state) + "\n");
@@ -300,7 +316,7 @@ void run_test_runtime()
   reset_config("cat > " + pipe_output_path().string());
   install_default_hooks();
   write_pid_file(getpid());
-  write_text(runtime_file(std::string(constants::runtime::recorder_wav_file)), "fake wav");
+  write_text(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)), "fake wav");
   runtime::toggle();
   ASSERT_EQ(state().copied_text, std::string("transcript text"));
   ASSERT_EQ(read_text(pipe_output_path()), std::string("transcript text\n"));
@@ -312,7 +328,7 @@ void run_test_runtime()
   install_default_hooks();
   state().transcript = " \n\t";
   write_pid_file(getpid());
-  write_text(runtime_file(std::string(constants::runtime::recorder_wav_file)), "fake wav");
+  write_text(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)), "fake wav");
   runtime::toggle();
   ASSERT_EQ(state().clipboard_calls, 0);
   ASSERT_EQ(state().last_notification, std::string("no output"));
@@ -329,7 +345,7 @@ void run_test_runtime()
   reset_config("sh -c 'cat > " + pipe_fail_marker_path().string() + "; exit 7'");
   install_default_hooks();
   write_pid_file(getpid());
-  write_text(runtime_file(std::string(constants::runtime::recorder_wav_file)), "fake wav");
+  write_text(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)), "fake wav");
   runtime::toggle();
   ASSERT_EQ(state().copied_text, std::string("transcript text"));
   ASSERT_EQ(read_text(pipe_fail_marker_path()), std::string("transcript text\n"));

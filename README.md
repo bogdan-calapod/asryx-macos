@@ -425,6 +425,11 @@ asryx --model list
 asryx --model install <MODEL>
 asryx --model use <MODEL>
 asryx --model uninstall <MODEL>
+asryx --diarize list
+asryx --diarize install <NAME>
+asryx --diarize use <NAME>
+asryx --diarize uninstall <NAME>
+asryx --no-diarize
 ```
 
 List supported models:
@@ -497,6 +502,90 @@ When `pipe_to` is non empty, bare `asryx` copies the transcript to the system cl
 ```text
 piped and copied to clipboard.
 ```
+
+## Speaker diarization (macOS)
+
+When asryx captures both your microphone and the system audio (the default macOS path with Screen Recording granted), the transcript is **speaker-labeled** instead of a single block of text.
+
+- Your microphone is always tagged `You` — it's your mic, no inference needed.
+- The system-audio stream is run through [`sherpa-onnx`](https://github.com/k2-fsa/sherpa-onnx) speaker diarization (pyannote segmentation 3.0 + a wespeaker embedding model) to assign `Speaker 1`, `Speaker 2`, `Speaker 3`, … labels.
+- The two streams are merged by timestamp into a single dialogue.
+
+### Models
+
+Two ONNX models are required for diarization. Install them once:
+
+```bash
+asryx --diarize install pyannote-segmentation-3-0
+asryx --diarize install wespeaker-voxceleb-resnet34
+```
+
+Combined download is ~55 MB into `~/.local/share/asryx/diarize/`.
+
+Available embedding models:
+
+| Name | Size | Strength |
+|---|---|---|
+| `wespeaker-voxceleb-resnet34` | ~25 MB | English-strong, recommended default |
+| `3dspeaker-eres2net` | ~25 MB | Multilingual, slightly heavier inference |
+
+Switch via:
+
+```bash
+asryx --diarize use 3dspeaker-eres2net
+```
+
+### Output formats
+
+asryx renders the transcript in two places:
+
+- **Clipboard** — human-readable dialogue (default), e.g.:
+  ```text
+  You: Morning team, quick standup. Andy, can you start?
+  Speaker 1: Sure, I shipped the auth PR yesterday, waiting on review.
+  You: Cool. Maria?
+  Speaker 2: Thursday after lunch for the demo.
+  ```
+  Pure-dictation recordings (only the mic, no other speakers) drop the `You:` prefix and emit plain text — that's the same behavior asryx had pre-diarization.
+
+- **`pipe_to`** — structured JSON (default), conforming to `asryx_schema_version: 1`:
+  ```json
+  {
+    "asryx_schema_version": 1,
+    "meta": {
+      "language": "en",
+      "started_at": "2026-06-11T08:42:13Z",
+      "duration_seconds": 184.3,
+      "num_speakers_detected": 3,
+      "model": "large-v3-turbo",
+      "diarization_segmentation_model": "pyannote-segmentation-3-0",
+      "diarization_embedding_model": "wespeaker-voxceleb-resnet34"
+    },
+    "segments": [
+      {"speaker": "you",       "t0": 0.00,  "t1":  4.21, "text": "Morning team..."},
+      {"speaker": "speaker_1", "t0": 4.55,  "t1":  9.12, "text": "Sure, I shipped..."}
+    ]
+  }
+  ```
+
+Configure either format via `~/.asryx.conf`:
+
+```text
+clipboard_format=dialogue    # or json, plain
+pipe_to_format=json          # or dialogue, plain
+diarize=true                 # set false to skip diarization (single transcript)
+diarize_threshold=0.7        # higher = merge speakers more aggressively
+```
+
+Or one-shot disable for an invocation with `asryx --no-diarize`.
+
+### Hallucination filtering
+
+Whisper sometimes invents text on quiet system audio (the classic "Thanks for watching!" problem). asryx uses sherpa's voice-activity output as a conservative gate: if sherpa reports no speech in a `[t0, t1]` range, the corresponding whisper text is dropped. Aggressive filtering is left to your downstream pipeline.
+
+### Linux
+
+Diarization is **macOS-only in v0.2.x**. Linux captures only the mic stream and emits a single unlabeled transcript, same as v0.1.x.
 
 ## Models
 

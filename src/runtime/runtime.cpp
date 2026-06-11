@@ -2,10 +2,13 @@
 
 #include "config/config.hpp"
 #include "constants/constants.hpp"
+#include "engine/diarize.hpp"
 #include "engine/engine.hpp"
+#include "engine/format.hpp"
 #include "model/model.hpp"
 #include "platform/fs.hpp"
 #include "platform/process.hpp"
+#include "runtime/render.hpp"
 
 #include <cctype>
 #include <cstdlib>
@@ -17,6 +20,7 @@
 #include <string>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 namespace runtime {
 
@@ -74,7 +78,8 @@ void release_lock(const std::filesystem::path& runtime_dir)
 void clean_stale_payload(const std::filesystem::path& runtime_dir)
 {
   platform::safe_delete_file(runtime_dir / std::string(constants::runtime::recorder_pid_file));
-  platform::safe_delete_file(runtime_dir / std::string(constants::runtime::recorder_wav_file));
+  platform::safe_delete_file(runtime_dir / std::string(constants::runtime::recorder_mic_wav_file));
+  platform::safe_delete_file(runtime_dir / std::string(constants::runtime::recorder_sys_wav_file));
   platform::safe_delete_file(runtime_dir / std::string(constants::runtime::recorder_error_file));
   platform::safe_delete_file(runtime_dir / std::string(constants::runtime::state_file));
 }
@@ -84,20 +89,16 @@ std::string read_text_file(const std::filesystem::path& path)
   if (!std::filesystem::exists(path)) {
     return "";
   }
-
   std::ifstream file(path);
   if (!file.is_open()) {
     return "";
   }
-
   std::string output;
   std::string line;
-
   while (std::getline(file, line)) {
     output += line;
     output += '\n';
   }
-
   return output;
 }
 
@@ -107,14 +108,9 @@ std::string read_state_file(const std::filesystem::path& runtime_dir)
   if (!std::filesystem::exists(state_file)) {
     return "";
   }
-
   std::ifstream file(state_file);
   std::string state;
-  if (file >> state) {
-    return state;
-  }
-
-  return "";
+  return (file >> state) ? state : std::string();
 }
 
 bool has_live_lock(const std::filesystem::path& runtime_dir)
@@ -136,12 +132,10 @@ std::string trim(std::string value)
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
     value.pop_back();
   }
-
   size_t start = 0;
   while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])) != 0) {
     ++start;
   }
-
   return value.substr(start);
 }
 
@@ -191,9 +185,10 @@ void start_recording(const std::filesystem::path& runtime_dir)
                              cfg.model);
   }
 
-  auto wav_path = runtime_dir / std::string(constants::runtime::recorder_wav_file);
+  auto mic_wav = runtime_dir / std::string(constants::runtime::recorder_mic_wav_file);
+  auto sys_wav = runtime_dir / std::string(constants::runtime::recorder_sys_wav_file);
   auto err_path = runtime_dir / std::string(constants::runtime::recorder_error_file);
-  pid_t pid = engine::start_recording(wav_path.string(), err_path.string());
+  pid_t pid = engine::start_recording(mic_wav.string(), sys_wav.string(), err_path.string());
   if (!platform::is_process_running(pid)) {
     throw std::runtime_error("recorder process exited before startup completed");
   }
@@ -203,38 +198,40 @@ void start_recording(const std::filesystem::path& runtime_dir)
   engine::send_notification("recording…");
 }
 
-void route_transcription(const std::filesystem::path& runtime_dir, const config::Config& cfg,
-                         const std::string& output)
+void log_and_notify_failure(const std::filesystem::path& runtime_dir, const std::string& log_text,
+                            const std::string& notification, const std::string& cli_err)
 {
-  if (!engine::copy_to_clipboard(output)) {
-    const auto log_path =
-        write_runtime_log(runtime_dir, "clipboard copy failed; transcript was not copied.\n");
-    std::cerr << "clipboard failed; see log: " << log_path << "\n";
-    engine::send_notification("clipboard failed; see log");
-    clean_stale_payload(runtime_dir);
+  const auto log_path = write_runtime_log(runtime_dir, log_text);
+  std::cerr << cli_err << log_path << "\n";
+  engine::send_notification(notification);
+  clean_stale_payload(runtime_dir);
+}
+
+void route_transcription(const std::filesystem::path& runtime_dir, const config::Config& cfg,
+                         const std::string& clipboard_output,
+                         const std::vector<engine::format::LabeledSegment>& segments,
+                         const engine::format::JsonMeta& meta)
+{
+  if (!engine::copy_to_clipboard(clipboard_output)) {
+    log_and_notify_failure(runtime_dir, "clipboard copy failed; transcript was not copied.\n",
+                           "clipboard failed; see log", "clipboard failed; see log: ");
     return;
   }
-
   if (cfg.pipe_to.empty()) {
     engine::send_notification(std::string(constants::notifications::transcription_copied));
     clean_stale_payload(runtime_dir);
     return;
   }
-
-  if (!platform::run_process_with_stdin({"sh", "-c", cfg.pipe_to}, output)) {
-    const auto log_path =
-        write_runtime_log(runtime_dir, "pipe target failed; transcript was copied to clipboard.\n");
-    std::cerr << "pipe target failed; transcript remains in clipboard; see log: " << log_path
-              << "\n";
-    engine::send_notification(std::string(constants::notifications::pipe_failed));
-    clean_stale_payload(runtime_dir);
+  const auto pipe_payload = runtime::render::render_for_format(segments, meta, cfg.pipe_to_format);
+  if (!platform::run_process_with_stdin({"sh", "-c", cfg.pipe_to}, pipe_payload)) {
+    log_and_notify_failure(runtime_dir, "pipe target failed; transcript was copied to clipboard.\n",
+                           std::string(constants::notifications::pipe_failed),
+                           "pipe target failed; transcript remains in clipboard; see log: ");
     return;
   }
-
   engine::send_notification(std::string(constants::notifications::pipe_copied));
   clean_stale_payload(runtime_dir);
 }
-
 void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid)
 {
   if (!engine::stop_recording(rec_pid)) {
@@ -248,16 +245,23 @@ void stop_and_transcribe(const std::filesystem::path& runtime_dir, pid_t rec_pid
   auto cfg = config::load_config();
   const auto language = model::transcription_language_for(cfg);
   auto model_path = model::get_model_path(cfg.model);
-  auto wav_path = runtime_dir / std::string(constants::runtime::recorder_wav_file);
-  auto output = trim(engine::transcribe(model_path, wav_path.string(), language));
 
-  if (output.empty()) {
+  auto assembled = runtime::render::assemble_transcript(runtime_dir, cfg, language, model_path);
+  if (assembled.merged.empty()) {
     engine::send_notification("no output");
     clean_stale_payload(runtime_dir);
     return;
   }
 
-  route_transcription(runtime_dir, cfg, output);
+  const auto clipboard_text =
+      runtime::render::render_for_format(assembled.merged, assembled.meta, cfg.clipboard_format);
+  if (clipboard_text.empty()) {
+    engine::send_notification("no output");
+    clean_stale_payload(runtime_dir);
+    return;
+  }
+
+  route_transcription(runtime_dir, cfg, clipboard_text, assembled.merged, assembled.meta);
 }
 
 } // namespace

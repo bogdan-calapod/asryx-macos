@@ -11,6 +11,7 @@ struct Hooks
   StartRecordingHook start_recording = nullptr;
   StopRecordingHook stop_recording = nullptr;
   TranscribeHook transcribe = nullptr;
+  TranscribeWithSegmentsHook transcribe_with_segments = nullptr;
   CopyToClipboardHook copy_to_clipboard = nullptr;
   NotificationHook notification = nullptr;
 };
@@ -36,6 +37,11 @@ void set_stop_recording_hook(StopRecordingHook hook)
 void set_transcribe_hook(TranscribeHook hook)
 {
   hooks().transcribe = hook;
+}
+
+void set_transcribe_with_segments_hook(TranscribeWithSegmentsHook hook)
+{
+  hooks().transcribe_with_segments = hook;
 }
 
 void set_copy_to_clipboard_hook(CopyToClipboardHook hook)
@@ -66,6 +72,11 @@ StopRecordingHook stop_recording_hook()
 TranscribeHook transcribe_hook()
 {
   return hooks().transcribe;
+}
+
+TranscribeWithSegmentsHook transcribe_with_segments_hook()
+{
+  return hooks().transcribe_with_segments;
 }
 
 CopyToClipboardHook copy_to_clipboard_hook()

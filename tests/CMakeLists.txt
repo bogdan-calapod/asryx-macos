@@ -18,8 +18,10 @@ target_compile_definitions(
   PRIVATE
     ASRYX_TESTING
     ASRYX_WHISPER_SOURCE_DIR_DEFAULT="${ASRYX_WHISPER_SOURCE_DIR_DEFAULT}"
+    ASRYX_SHERPA_SOURCE_DIR_DEFAULT="${ASRYX_SHERPA_SOURCE_DIR_DEFAULT}"
 )
-target_link_libraries(asryx_tests PRIVATE whisper)
+target_include_directories(asryx_tests PRIVATE "${ASRYX_SHERPA_SOURCE_DIR}")
+target_link_libraries(asryx_tests PRIVATE whisper sherpa-onnx-c-api)
 
 if(APPLE)
   target_link_libraries(

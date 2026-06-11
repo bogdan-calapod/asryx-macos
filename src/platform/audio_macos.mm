@@ -214,8 +214,9 @@ std::vector<int16_t> convert_to_mono_int16(AVAudioConverter* converter, AVAudioP
 class CaptureSession
 {
 public:
-  CaptureSession(CaptureMode mode, const std::string& wav_path)
-      : mode_(mode), wav_path_(wav_path), mic_ring_(kRingCapacityFrames),
+  CaptureSession(CaptureMode mode, std::string mic_wav_path, std::string sys_wav_path)
+      : mode_(mode), mic_wav_path_(std::move(mic_wav_path)),
+        sys_wav_path_(std::move(sys_wav_path)), mic_ring_(kRingCapacityFrames),
         sys_ring_(kRingCapacityFrames)
   {
   }
@@ -230,17 +231,19 @@ public:
   bool include_system() const { return mode_ == CaptureMode::All; }
 
 private:
-  void mixer_loop();
+  void drain_loop();
 
   CaptureMode mode_;
-  std::string wav_path_;
-  WavWriter writer_;
+  std::string mic_wav_path_;
+  std::string sys_wav_path_;
+  WavWriter mic_writer_;
+  WavWriter sys_writer_;
 
   SampleRing mic_ring_;
   SampleRing sys_ring_;
 
   std::atomic<bool> running_{false};
-  std::thread mixer_;
+  std::thread drainer_;
 
   AVAudioEngine* engine_{nil};
   AVAudioFormat* output_format_{nil};
@@ -329,9 +332,19 @@ namespace {
 bool CaptureSession::start()
 {
   @autoreleasepool {
-    if (!writer_.open(wav_path_)) {
-      std::cerr << "asryx: failed to open wav for writing: " << wav_path_ << "\n";
+    if (!mic_writer_.open(mic_wav_path_)) {
+      std::cerr << "asryx: failed to open mic wav for writing: " << mic_wav_path_ << "\n";
       return false;
+    }
+    if (include_system()) {
+      if (sys_wav_path_.empty()) {
+        std::cerr << "asryx: system capture requested but no sys wav path provided\n";
+        return false;
+      }
+      if (!sys_writer_.open(sys_wav_path_)) {
+        std::cerr << "asryx: failed to open sys wav for writing: " << sys_wav_path_ << "\n";
+        return false;
+      }
     }
 
     output_format_ =
@@ -510,69 +523,45 @@ bool CaptureSession::start()
     }
 
     running_ = true;
-    mixer_ = std::thread([this] { mixer_loop(); });
+    drainer_ = std::thread([this] { drain_loop(); });
     return true;
   }
 }
 
-void CaptureSession::mixer_loop()
+void CaptureSession::drain_loop()
 {
-  std::vector<int16_t> mic_chunk(2048);
-  std::vector<int16_t> sys_chunk(2048);
-  std::vector<int16_t> mix_chunk(2048);
+  std::vector<int16_t> chunk(4096);
 
+  // Drain each ring buffer into its dedicated writer. Mic and sys are
+  // independent files; no mixing happens in process. The two streams stay
+  // separated all the way through transcription so downstream code can label
+  // each segment correctly without any diarization on the mic stream.
   while (running_.load(std::memory_order_acquire)) {
-    if (include_system()) {
-      size_t available = std::min(mic_ring_.available(), sys_ring_.available());
-      if (available == 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        continue;
-      }
-      size_t take = std::min(available, mic_chunk.size());
-      size_t mic_got = mic_ring_.pop(mic_chunk.data(), take);
-      size_t sys_got = sys_ring_.pop(sys_chunk.data(), take);
-      size_t n = std::min(mic_got, sys_got);
-      for (size_t i = 0; i < n; ++i) {
-        int32_t sum = static_cast<int32_t>(mic_chunk[i]) + static_cast<int32_t>(sys_chunk[i]);
-        sum = std::max<int32_t>(INT16_MIN, std::min<int32_t>(INT16_MAX, sum));
-        mix_chunk[i] = static_cast<int16_t>(sum);
-      }
-      writer_.write_samples(mix_chunk.data(), n);
+    bool did_work = false;
+    if (mic_ring_.available() > 0) {
+      size_t got = mic_ring_.pop(chunk.data(), chunk.size());
+      mic_writer_.write_samples(chunk.data(), got);
+      did_work = did_work || got > 0;
     }
-    else {
-      size_t available = mic_ring_.available();
-      if (available == 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        continue;
-      }
-      size_t take = std::min(available, mic_chunk.size());
-      size_t got = mic_ring_.pop(mic_chunk.data(), take);
-      writer_.write_samples(mic_chunk.data(), got);
+    if (include_system() && sys_ring_.available() > 0) {
+      size_t got = sys_ring_.pop(chunk.data(), chunk.size());
+      sys_writer_.write_samples(chunk.data(), got);
+      did_work = did_work || got > 0;
+    }
+    if (!did_work) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
   }
 
-  // Drain whatever's left.
-  std::vector<int16_t> tail(4096);
-  if (include_system()) {
-    while (mic_ring_.available() > 0 && sys_ring_.available() > 0) {
-      size_t take = std::min({mic_ring_.available(), sys_ring_.available(), tail.size()});
-      std::vector<int16_t> m(take);
-      std::vector<int16_t> s(take);
-      size_t mg = mic_ring_.pop(m.data(), take);
-      size_t sg = sys_ring_.pop(s.data(), take);
-      size_t n = std::min(mg, sg);
-      for (size_t i = 0; i < n; ++i) {
-        int32_t sum = static_cast<int32_t>(m[i]) + static_cast<int32_t>(s[i]);
-        sum = std::max<int32_t>(INT16_MIN, std::min<int32_t>(INT16_MAX, sum));
-        tail[i] = static_cast<int16_t>(sum);
-      }
-      writer_.write_samples(tail.data(), n);
-    }
+  // Drain whatever's left after the running flag flipped.
+  while (mic_ring_.available() > 0) {
+    size_t got = mic_ring_.pop(chunk.data(), chunk.size());
+    mic_writer_.write_samples(chunk.data(), got);
   }
-  else {
-    while (mic_ring_.available() > 0) {
-      size_t got = mic_ring_.pop(tail.data(), tail.size());
-      writer_.write_samples(tail.data(), got);
+  if (include_system()) {
+    while (sys_ring_.available() > 0) {
+      size_t got = sys_ring_.pop(chunk.data(), chunk.size());
+      sys_writer_.write_samples(chunk.data(), got);
     }
   }
 }
@@ -601,11 +590,12 @@ void CaptureSession::stop()
       engine_ = nil;
     }
 
-    if (mixer_.joinable()) {
-      mixer_.join();
+    if (drainer_.joinable()) {
+      drainer_.join();
     }
 
-    writer_.close();
+    mic_writer_.close();
+    sys_writer_.close();
   }
 }
 
@@ -647,7 +637,8 @@ void open_screen_recording_settings()
       {"open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"});
 }
 
-pid_t spawn_capture(CaptureMode mode, const std::string& wav_path, const std::string& err_path)
+pid_t spawn_capture(CaptureMode mode, const std::string& mic_wav_path,
+                    const std::string& sys_wav_path, const std::string& err_path)
 {
   std::string self_exe = resolve_self_executable();
   if (self_exe.empty()) {
@@ -658,15 +649,20 @@ pid_t spawn_capture(CaptureMode mode, const std::string& wav_path, const std::st
   argv.push_back(self_exe);
   argv.emplace_back("--internal-capture");
   argv.emplace_back(mode == CaptureMode::All ? "all" : "mic");
-  argv.push_back(wav_path);
+  argv.push_back(mic_wav_path);
+  // For mic-only mode the empty sys path is still passed positionally so the
+  // child's argv parsing stays uniform. Empty string serializes through fine.
+  argv.push_back(sys_wav_path);
 
   return platform::spawn_process_background(argv, err_path);
 }
 
-int run_capture_child(CaptureMode mode, const std::string& wav_path)
+int run_capture_child(CaptureMode mode, const std::string& mic_wav_path,
+                      const std::string& sys_wav_path)
 {
   std::cerr << "asryx: capture child started (mode="
-            << (mode == CaptureMode::All ? "all" : "mic") << ", wav=" << wav_path << ")\n";
+            << (mode == CaptureMode::All ? "all" : "mic") << ", mic=" << mic_wav_path
+            << ", sys=" << (sys_wav_path.empty() ? "<none>" : sys_wav_path) << ")\n";
   std::cerr.flush();
 
   struct sigaction sa{};
@@ -685,7 +681,7 @@ int run_capture_child(CaptureMode mode, const std::string& wav_path)
   std::cerr << "asryx: starting capture session...\n";
   std::cerr.flush();
 
-  CaptureSession session(mode, wav_path);
+  CaptureSession session(mode, mic_wav_path, sys_wav_path);
   if (!session.start()) {
     std::cerr << "asryx: failed to start capture session\n";
     return 1;

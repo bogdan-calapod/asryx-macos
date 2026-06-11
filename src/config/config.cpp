@@ -45,6 +45,29 @@ Config load_config()
     else if (key == constants::config::mic_only_fallback_key) {
       cfg.mic_only_fallback = (val == "1" || val == "true" || val == "yes" || val == "on");
     }
+    else if (key == constants::config::diarize_enabled_key) {
+      cfg.diarize_enabled = !(val == "0" || val == "false" || val == "no" || val == "off");
+    }
+    else if (key == constants::config::diarize_segmentation_model_key) {
+      cfg.diarize_segmentation_model = val;
+    }
+    else if (key == constants::config::diarize_embedding_model_key) {
+      cfg.diarize_embedding_model = val;
+    }
+    else if (key == constants::config::diarize_threshold_key) {
+      try {
+        cfg.diarize_threshold = std::stof(val);
+      }
+      catch (const std::exception&) {
+        // ignore malformed values; keep default
+      }
+    }
+    else if (key == constants::config::clipboard_format_key) {
+      cfg.clipboard_format = val;
+    }
+    else if (key == constants::config::pipe_to_format_key) {
+      cfg.pipe_to_format = val;
+    }
   }
 
   return cfg;
@@ -68,6 +91,15 @@ void save_config(const Config& cfg)
     file << constants::config::pipe_to_key << "=" << cfg.pipe_to << "\n";
     file << constants::config::mic_only_fallback_key << "="
          << (cfg.mic_only_fallback ? "true" : "false") << "\n";
+    file << constants::config::diarize_enabled_key << "="
+         << (cfg.diarize_enabled ? "true" : "false") << "\n";
+    file << constants::config::diarize_segmentation_model_key << "="
+         << cfg.diarize_segmentation_model << "\n";
+    file << constants::config::diarize_embedding_model_key << "=" << cfg.diarize_embedding_model
+         << "\n";
+    file << constants::config::diarize_threshold_key << "=" << cfg.diarize_threshold << "\n";
+    file << constants::config::clipboard_format_key << "=" << cfg.clipboard_format << "\n";
+    file << constants::config::pipe_to_format_key << "=" << cfg.pipe_to_format << "\n";
   }
 
   std::filesystem::rename(tmp_path, path);

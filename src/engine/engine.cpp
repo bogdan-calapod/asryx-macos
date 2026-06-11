@@ -106,9 +106,10 @@ struct WhisperDeleter
 
 } // namespace
 
-pid_t start_recording(const std::string& wav_path, const std::string& err_path)
+pid_t start_recording(const std::string& mic_wav_path, const std::string& sys_wav_path,
+                      const std::string& err_path)
 {
-  ASRYX_TEST_HOOK(start_recording_hook, wav_path, err_path);
+  ASRYX_TEST_HOOK(start_recording_hook, mic_wav_path, sys_wav_path, err_path);
 
 #if defined(__APPLE__)
   const auto cfg = config::load_config();
@@ -127,14 +128,20 @@ pid_t start_recording(const std::string& wav_path, const std::string& err_path)
     }
     mode = platform::audio::CaptureMode::Mic;
   }
-  pid_t pid = platform::audio::spawn_capture(mode, wav_path, err_path);
+  // sys_wav_path is forwarded unconditionally; the child writes to it only in
+  // CaptureMode::All. Mic-only fallback discards it via the empty-string check
+  // in spawn_capture.
+  const std::string sys_arg = (mode == platform::audio::CaptureMode::All) ? sys_wav_path : "";
+  pid_t pid = platform::audio::spawn_capture(mode, mic_wav_path, sys_arg, err_path);
 #else
+  // Linux only has microphone capture today; sys_wav_path is ignored.
+  (void)sys_wav_path;
   std::vector<std::string> args;
   if (platform::command_exists("pw-record")) {
-    args = {"pw-record", "--format=s16", "--rate=16000", "--channels=1", wav_path};
+    args = {"pw-record", "--format=s16", "--rate=16000", "--channels=1", mic_wav_path};
   }
   else if (platform::command_exists("arecord")) {
-    args = {"arecord", "-q", "-t", "wav", "-f", "S16_LE", "-c", "1", "-r", "16000", wav_path};
+    args = {"arecord", "-q", "-t", "wav", "-f", "S16_LE", "-c", "1", "-r", "16000", mic_wav_path};
   }
   else {
     throw std::runtime_error("No recorder tool found (need pw-record or arecord)");
@@ -169,52 +176,99 @@ bool stop_recording(pid_t pid)
   return wait_until_recorder_exits(pid);
 }
 
-std::string transcribe(const std::string& model_path, const std::string& wav_path,
-                       const std::string& language)
+namespace {
+
+void run_whisper_full(whisper_context* ctx, const std::vector<float>& samples,
+                      const std::string& language, bool want_timestamps)
 {
-  ASRYX_TEST_HOOK(transcribe_hook, model_path, wav_path, language);
-
-  if (!std::filesystem::exists(model_path)) {
-    throw std::runtime_error("model file does not exist: " + model_path);
-  }
-
-  auto samples = read_pcm16_wav(wav_path);
-
-  whisper_context_params context_params = whisper_context_default_params();
-  std::unique_ptr<whisper_context, WhisperDeleter> ctx(
-      whisper_init_from_file_with_params(model_path.c_str(), context_params));
-
-  if (ctx == nullptr) {
-    throw std::runtime_error("failed to initialize whisper model: " + model_path);
-  }
-
-  const char* language_arg = whisper_language(ctx.get(), language);
+  const char* language_arg = whisper_language(ctx, language);
 
   whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
   params.n_threads = thread_count();
   params.print_progress = false;
   params.print_realtime = false;
   params.print_timestamps = false;
-  params.no_timestamps = true;
+  params.no_timestamps = !want_timestamps;
   params.suppress_blank = true;
   params.suppress_nst = true;
   params.language = language_arg;
   params.detect_language = false;
 
-  if (whisper_full(ctx.get(), params, samples.data(), static_cast<int>(samples.size())) != 0) {
+  if (whisper_full(ctx, params, samples.data(), static_cast<int>(samples.size())) != 0) {
     throw std::runtime_error("whisper transcription failed");
   }
+}
+
+std::unique_ptr<whisper_context, WhisperDeleter> load_whisper_context(const std::string& model_path)
+{
+  if (!std::filesystem::exists(model_path)) {
+    throw std::runtime_error("model file does not exist: " + model_path);
+  }
+  whisper_context_params context_params = whisper_context_default_params();
+  std::unique_ptr<whisper_context, WhisperDeleter> ctx(
+      whisper_init_from_file_with_params(model_path.c_str(), context_params));
+  if (ctx == nullptr) {
+    throw std::runtime_error("failed to initialize whisper model: " + model_path);
+  }
+  return ctx;
+}
+
+} // namespace
+
+std::string transcribe(const std::string& model_path, const std::string& wav_path,
+                       const std::string& language)
+{
+  ASRYX_TEST_HOOK(transcribe_hook, model_path, wav_path, language);
+
+  auto samples = read_pcm16_wav(wav_path);
+  auto ctx = load_whisper_context(model_path);
+  run_whisper_full(ctx.get(), samples, language, /*want_timestamps=*/false);
 
   std::string output;
   const int segments = whisper_full_n_segments(ctx.get());
-
   for (int i = 0; i < segments; ++i) {
     const char* text = whisper_full_get_segment_text(ctx.get(), i);
     if (text != nullptr) {
       output += text;
     }
   }
+  return output;
+}
 
+std::vector<TranscriptSegment> transcribe_with_segments(const std::string& model_path,
+                                                        const std::string& wav_path,
+                                                        const std::string& language)
+{
+  ASRYX_TEST_HOOK(transcribe_with_segments_hook, model_path, wav_path, language);
+
+  if (!std::filesystem::exists(wav_path)) {
+    return {};
+  }
+
+  auto samples = read_pcm16_wav(wav_path);
+  if (samples.empty()) {
+    return {};
+  }
+
+  auto ctx = load_whisper_context(model_path);
+  run_whisper_full(ctx.get(), samples, language, /*want_timestamps=*/true);
+
+  std::vector<TranscriptSegment> output;
+  const int n = whisper_full_n_segments(ctx.get());
+  output.reserve(static_cast<size_t>(n));
+
+  for (int i = 0; i < n; ++i) {
+    const char* text = whisper_full_get_segment_text(ctx.get(), i);
+    if (text == nullptr) {
+      continue;
+    }
+    TranscriptSegment seg;
+    // whisper returns t0/t1 in centiseconds.
+    seg.t0 = static_cast<double>(whisper_full_get_segment_t0(ctx.get(), i)) / 100.0;
+    seg.t1 = static_cast<double>(whisper_full_get_segment_t1(ctx.get(), i)) / 100.0;
+    seg.text = text;
+    output.push_back(std::move(seg));
+  }
   return output;
 }
 

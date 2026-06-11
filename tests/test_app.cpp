@@ -25,7 +25,7 @@ std::filesystem::path runtime_file(const std::string& name)
 void clean_runtime_files()
 {
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_pid_file)));
-  platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_wav_file)));
+  platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_mic_wav_file)));
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::recorder_error_file)));
   platform::safe_delete_file(runtime_file(std::string(constants::runtime::state_file)));
 }
@@ -35,7 +35,7 @@ bool recording_files_exist()
   return std::filesystem::exists(
              runtime_file(std::string(constants::runtime::recorder_pid_file))) ||
          std::filesystem::exists(
-             runtime_file(std::string(constants::runtime::recorder_wav_file))) ||
+             runtime_file(std::string(constants::runtime::recorder_mic_wav_file))) ||
          std::filesystem::exists(runtime_file(std::string(constants::runtime::state_file)));
 }
 
@@ -84,15 +84,18 @@ void stop_started_recording()
   clean_runtime_files();
 }
 
-// Spawn a long-sleeping subprocess that touches the wav path and waits for
-// SIGINT/SIGTERM. Acts as a platform-neutral stand-in for the real capture
-// backend (sox on Linux, AVAudioEngine+ScreenCaptureKit on macOS) so this
-// test doesn't depend on real audio devices or system permissions.
-pid_t fake_capture_start(const std::string& wav_path, const std::string& err_path)
+// Spawn a long-sleeping subprocess that touches the mic wav path (and the
+// optional sys wav path) and waits for SIGINT/SIGTERM. Acts as a platform-
+// neutral stand-in for the real capture backend so this test doesn't depend
+// on real audio devices or system permissions.
+pid_t fake_capture_start(const std::string& mic_wav_path, const std::string& sys_wav_path,
+                         const std::string& err_path)
 {
-  std::vector<std::string> args = {
-      "sh", "-c", "wav=\"$1\"; : > \"$wav\"; trap 'exit 0' INT TERM; while :; do sleep 1; done",
-      "asryx-test-capture", wav_path};
+  std::string script =
+      "mic=\"$1\"; sys=\"$2\"; : > \"$mic\"; [ -n \"$sys\" ] && : > \"$sys\"; "
+      "trap 'exit 0' INT TERM; while :; do sleep 1; done";
+  std::vector<std::string> args = {"sh",         "-c",        script, "asryx-test-capture",
+                                   mic_wav_path, sys_wav_path};
   return platform::spawn_process_background(args, err_path);
 }
 

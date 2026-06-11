@@ -16,15 +16,20 @@ void print_usage()
 {
   std::cerr << "asryx - native voice to text toggle\n\n"
             << "Usage:\n"
-            << "  asryx                           Toggle recording/transcription\n"
-            << "  asryx status                    Print runtime state\n"
-            << "  asryx --pipe-to <command>       Set post-copy pipe command\n"
-            << "  asryx --no-pipe                 Clear post-copy pipe command\n"
-            << "  asryx --language <code|auto>    Select transcription language\n"
-            << "  asryx --model list              List available model sizes\n"
-            << "  asryx --model install <name>    Install a model\n"
-            << "  asryx --model use <name>        Select active model\n"
-            << "  asryx --model uninstall <name>  Uninstall a model\n";
+            << "  asryx                              Toggle recording/transcription\n"
+            << "  asryx status                       Print runtime state\n"
+            << "  asryx --pipe-to <command>          Set post-copy pipe command\n"
+            << "  asryx --no-pipe                    Clear post-copy pipe command\n"
+            << "  asryx --language <code|auto>       Select transcription language\n"
+            << "  asryx --model list                 List available model sizes\n"
+            << "  asryx --model install <name>       Install a model\n"
+            << "  asryx --model use <name>           Select active model\n"
+            << "  asryx --model uninstall <name>     Uninstall a model\n"
+            << "  asryx --diarize list               List speaker diarization models\n"
+            << "  asryx --diarize install <name>     Install a diarization model\n"
+            << "  asryx --diarize use <name>         Select active diarization model\n"
+            << "  asryx --diarize uninstall <name>   Uninstall a diarization model\n"
+            << "  asryx --no-diarize                 Disable diarization (single transcript)\n";
 }
 
 void set_pipe_to(const std::string& command)
@@ -42,6 +47,13 @@ void clear_pipe_to()
 {
   auto cfg = config::load_config();
   cfg.pipe_to.clear();
+  config::save_config(cfg);
+}
+
+void set_diarize_enabled(bool enabled)
+{
+  auto cfg = config::load_config();
+  cfg.diarize_enabled = enabled;
   config::save_config(cfg);
 }
 
@@ -95,6 +107,33 @@ int run(const std::vector<std::string>& args)
 
       if (args[1] == "uninstall") {
         model::uninstall_model(args[2]);
+        return 0;
+      }
+    }
+
+    if (args.size() == 1 && args[0] == "--no-diarize") {
+      set_diarize_enabled(false);
+      return 0;
+    }
+
+    if (args.size() == 2 && args[0] == "--diarize") {
+      if (args[1] == "list") {
+        model::diarize::list_models();
+        return 0;
+      }
+    }
+
+    if (args.size() == 3 && args[0] == "--diarize") {
+      if (args[1] == "install") {
+        model::diarize::install_model(args[2]);
+        return 0;
+      }
+      if (args[1] == "use") {
+        model::diarize::use_model(args[2]);
+        return 0;
+      }
+      if (args[1] == "uninstall") {
+        model::diarize::uninstall_model(args[2]);
         return 0;
       }
     }

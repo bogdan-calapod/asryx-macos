@@ -16,14 +16,14 @@ int main(int argc, char* argv[])
   for (int i = 1; i < argc; ++i) {
     args.emplace_back(argv[i]);
   }
-
 #if defined(__APPLE__)
-  if (args.size() == 3 && args[0] == "--internal-capture") {
+  if (args.size() == 4 && args[0] == "--internal-capture") {
     const auto& mode_str = args[1];
-    const auto& wav_path = args[2];
+    const auto& mic_wav_path = args[2];
+    const auto& sys_wav_path = args[3];
     platform::audio::CaptureMode mode =
         (mode_str == "all") ? platform::audio::CaptureMode::All : platform::audio::CaptureMode::Mic;
-    return platform::audio::run_capture_child(mode, wav_path);
+    return platform::audio::run_capture_child(mode, mic_wav_path, sys_wav_path);
   }
 #endif
 
