@@ -194,6 +194,18 @@ void run_whisper_full(whisper_context* ctx, const std::vector<float>& samples,
   params.language = language_arg;
   params.detect_language = false;
 
+  // Hallucination suppression for silent / near-silent audio (whisper's
+  // infamous "Hello what's up" / "Thanks for watching" confabulations).
+  // no_speech_thold: segments whose no-speech probability exceeds this are
+  // treated as silence (0.6 default -> 0.8, matching stock OpenAI whisper).
+  // logprob_thold: segments whose mean token log-probability falls below
+  // this are considered unreliable (-1.0 default -> -0.5, stricter).
+  // temperature_inc enables the fallback re-decode loop; without it the two
+  // thresholds above are checked but never acted upon.
+  params.no_speech_thold = 0.8F;
+  params.logprob_thold = -0.5F;
+  params.temperature_inc = 0.2F;
+
   if (whisper_full(ctx, params, samples.data(), static_cast<int>(samples.size())) != 0) {
     throw std::runtime_error("whisper transcription failed");
   }

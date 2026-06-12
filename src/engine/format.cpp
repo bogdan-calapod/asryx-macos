@@ -27,6 +27,21 @@ std::string trim_copy(std::string_view s)
   return std::string(s.substr(start, end - start));
 }
 
+// True when the text carries no actual content — only ASCII punctuation and
+// whitespace. Whisper emits lone "." / "..." segments for near-silent audio
+// that survives the no-speech threshold; those are noise, not transcript.
+// Multi-byte (non-ASCII) characters count as content.
+bool punctuation_only(std::string_view s)
+{
+  for (char ch : s) {
+    const auto uc = static_cast<unsigned char>(ch);
+    if (uc >= 0x80U || std::isalnum(uc) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 std::string speaker_token_for(int speaker_id)
 {
   return "speaker_" + std::to_string(speaker_id);
@@ -115,7 +130,7 @@ std::vector<LabeledSegment> label_mic_segments(const std::vector<TranscriptSegme
   out.reserve(mic.size());
   for (const auto& seg : mic) {
     std::string text = trim_copy(seg.text);
-    if (text.empty()) {
+    if (text.empty() || punctuation_only(text)) {
       continue;
     }
     out.push_back(
@@ -132,7 +147,7 @@ std::vector<LabeledSegment> label_sys_segments(const std::vector<TranscriptSegme
 
   for (const auto& seg : sys) {
     std::string text = trim_copy(seg.text);
-    if (text.empty()) {
+    if (text.empty() || punctuation_only(text)) {
       continue;
     }
 
